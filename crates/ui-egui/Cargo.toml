@@ -1,0 +1,32 @@
+[package]
+name = "ui-egui"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+diagram = { version = "2.0.0", path = "../diagram" }
+eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "x11", "wayland", "default_fonts", "accesskit", "persistence"] }
+egui_commonmark = { version = "0.26.0", default-features = false, features = ["pulldown_cmark"] }
+egui_plot = "0.38.0"
+engine = { version = "2.0.0", path = "../engine" }
+foundation = { version = "2.0.0", path = "../foundation" }
+i18n = { version = "2.0.0", path = "../i18n" }
+jiff = "0.2.38"
+model = { version = "2.0.0", path = "../model" }
+protocol = { version = "2.0.0", path = "../protocol" }
+rules = { version = "2.0.0", path = "../rules" }
+serde_json = "1.0.154"
+store = { version = "2.0.0", path = "../store" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }
+store-sqlite = { path = "../store-sqlite" }
+
+[package.metadata.craft]
+layer = 6

@@ -1,0 +1,25 @@
+# Flatpak (guía Craft §7.4). `cargo xtask dist linux` lo construye a partir
+# del binario ya compilado que deja en dist/stage-<arch>.
+app-id: io.github.astradlcs.TaskCraft
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: taskcraft
+finish-args:
+  - --share=ipc
+  - --share=network          # MCP por HTTP y PostgreSQL remoto
+  - --socket=x11             # la app fuerza X11 por defecto (no fallback-x11)
+  - --socket=wayland         # TASKCRAFT_WAYLAND=1
+  - --device=dri
+  - --talk-name=org.freedesktop.Notifications
+modules:
+  - name: taskcraft
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../../../dist/stage-x86_64/usr
+        dest: usr
+    build-commands:
+      - install -Dm755 usr/bin/taskcraft /app/bin/taskcraft
+      - install -Dm755 usr/bin/taskcraft-cli /app/bin/taskcraft-cli
+      - cp -r usr/share /app/

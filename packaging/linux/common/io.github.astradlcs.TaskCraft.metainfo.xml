@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.astradlcs.TaskCraft</id>
+  <name>TaskCraft</name>
+  <summary>Plan, coordinate and review the work of several AI agents</summary>
+  <summary xml:lang="es">Planifica, coordina y revisa el trabajo de varios agentes de IA</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <description>
+    <p>
+      TaskCraft is a local task planner where several AI agents work on the same projects
+      at the same time through MCP, while a person supervises: claims with leases,
+      dependencies, review queue, history and reverting.
+    </p>
+    <p xml:lang="es">
+      TaskCraft es un planificador de tareas local donde varios agentes de IA trabajan a la vez
+      sobre los mismos proyectos por MCP, mientras una persona supervisa: tomas con lease,
+      dependencias, cola de revisión, historial y reversión.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.astradlcs.TaskCraft.desktop</launchable>
+  <url type="homepage">https://github.com/AstraDLCs/TaskCraft</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="2.0.0" date="2026-10-26"/>
+    <release version="1.1.0" date="2026-10-26"/>
+    <release version="1.0.0" date="2026-10-26"/>
+  </releases>
+</component>

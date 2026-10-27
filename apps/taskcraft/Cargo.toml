@@ -1,0 +1,57 @@
+[package]
+name = "taskcraft"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+client = { version = "2.0.0", path = "../../crates/client" }
+eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "x11", "wayland", "default_fonts", "accesskit", "persistence", "clipboard"] }
+engine = { version = "2.0.0", path = "../../crates/engine" }
+i18n = { version = "2.0.0", path = "../../crates/i18n" }
+server = { version = "2.0.0", path = "../../crates/server" }
+store = { version = "2.0.0", path = "../../crates/store" }
+store-postgres = { version = "2.0.0", path = "../../crates/store-postgres" }
+store-sqlite = { version = "2.0.0", path = "../../crates/store-sqlite" }
+tracing = "0.1.44"
+ui-egui = { version = "2.0.0", path = "../../crates/ui-egui" }
+
+[lints]
+workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30.13", default-features = false, features = ["x11", "wayland", "rwh_06"] }
+
+[dev-dependencies]
+exchange = { path = "../../crates/exchange" }
+jiff = "0.2.38"
+model = { path = "../../crates/model" }
+
+# `.rpm` con cargo-generate-rpm (`cargo xtask dist linux`, RNF-11a). Las rutas
+# son relativas a la raíz del workspace; `target/release` pasa a
+# `target/<triple>/release` con `--target`.
+[package.metadata.generate-rpm]
+summary = "Plan, coordinate and review the work of several AI agents"
+url = "https://github.com/AstraDLCs/TaskCraft"
+assets = [
+    { source = "target/release/taskcraft", dest = "/usr/bin/taskcraft", mode = "755" },
+    { source = "target/release/taskcraft-cli", dest = "/usr/bin/taskcraft-cli", mode = "755" },
+    { source = "packaging/linux/common/io.github.astradlcs.TaskCraft.desktop", dest = "/usr/share/applications/io.github.astradlcs.TaskCraft.desktop", mode = "644" },
+    { source = "packaging/linux/common/io.github.astradlcs.TaskCraft.metainfo.xml", dest = "/usr/share/metainfo/io.github.astradlcs.TaskCraft.metainfo.xml", mode = "644" },
+    { source = "dist/icons/hicolor/48x48/apps/io.github.astradlcs.TaskCraft.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.astradlcs.TaskCraft.png", mode = "644" },
+    { source = "dist/icons/hicolor/128x128/apps/io.github.astradlcs.TaskCraft.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.astradlcs.TaskCraft.png", mode = "644" },
+    { source = "dist/icons/hicolor/256x256/apps/io.github.astradlcs.TaskCraft.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.astradlcs.TaskCraft.png", mode = "644" },
+    { source = "dist/icons/hicolor/512x512/apps/io.github.astradlcs.TaskCraft.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.astradlcs.TaskCraft.png", mode = "644" },
+    { source = "dist/icons/hicolor/scalable/apps/io.github.astradlcs.TaskCraft.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.astradlcs.TaskCraft.svg", mode = "644" },
+    { source = "LICENSE-MIT", dest = "/usr/share/doc/taskcraft/LICENSE-MIT", mode = "644", doc = true },
+    { source = "LICENSE-APACHE", dest = "/usr/share/doc/taskcraft/LICENSE-APACHE", mode = "644", doc = true },
+]
+auto-req = "no"
+
+[package.metadata.generate-rpm.requires]
+glibc = ">= 2.28"
+libxkbcommon = "*"
+libxkbcommon-x11 = "*"
+libglvnd-egl = "*"

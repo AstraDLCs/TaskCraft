@@ -1,0 +1,21 @@
+[package]
+name = "taskcraft-web"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
+i18n = { version = "2.0.0", path = "../../crates/i18n" }
+serde_json = "1.0.154"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "persistence"] }
+ehttp = "0.7.2"
+wasm-bindgen-futures = "0.4.79"
+web-sys = { version = "0.3.106", features = ["Window", "Document", "HtmlCanvasElement", "Location", "Storage"] }

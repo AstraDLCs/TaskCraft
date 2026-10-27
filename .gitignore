@@ -1,0 +1,61 @@
+# ── Rust / Cargo ───────────────────────────────────────────────
+# Cargo.lock SÍ se versiona: el workspace produce binarios.
+/target
+**/*.rs.bk
+*.pdb
+
+# Cobertura y profiling (cargo llvm-cov, grcov, perf, flamegraph)
+*.profraw
+*.profdata
+/coverage
+lcov.info
+perf.data
+perf.data.old
+flamegraph.svg
+
+# ── Empaquetado (cargo xtask dist) ─────────────────────────────
+/dist
+# flatpak-builder deja su caché en el directorio desde donde se ejecuta
+.flatpak-builder/
+# wixl / wix
+*.msi
+*.wixobj
+*.wixpdb
+
+# ── Datos locales de ejecución ─────────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+
+# ── Secretos / entorno ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Editores / IDE ─────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.iml
+.zed/
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# ── Claude Code (config local por usuario) ─────────────────────
+.claude/settings.local.json
+
+# ── Sistema operativo ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Entradas previas ───────────────────────────────────────────
+md

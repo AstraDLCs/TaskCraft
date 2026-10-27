@@ -1,0 +1,33 @@
+[package]
+name = "server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+engine = { version = "2.0.0", path = "../engine" }
+foundation = { version = "2.0.0", path = "../foundation" }
+i18n = { version = "2.0.0", path = "../i18n" }
+model = { version = "2.0.0", path = "../model" }
+protocol = { version = "2.0.0", path = "../protocol" }
+serde_json = "1.0.154"
+store = { version = "2.0.0", path = "../store" }
+store-postgres = { version = "2.0.0", path = "../store-postgres" }
+store-sqlite = { version = "2.0.0", path = "../store-sqlite" }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
+tracing = "0.1.44"
+ureq = "3.5.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+client = { path = "../client" }
+engine = { path = "../engine", features = ["testing"] }
+jiff = "0.2.38"
+postgres = "0.19.14"
+
+[package.metadata.craft]
+layer = 6

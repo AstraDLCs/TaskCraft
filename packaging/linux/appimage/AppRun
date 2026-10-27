@@ -1,0 +1,19 @@
+#!/bin/sh
+# AppImage: arranca la app de escritorio; la CLI (y el daemon) van al lado.
+HERE="$(dirname "$(readlink -f "$0")")"
+export PATH="$HERE/usr/bin:$PATH"
+# Integración en el menú al primer arranque (guía Craft §7.4).
+if [ -n "$APPIMAGE" ]; then
+    apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps"
+    desktop="$apps/io.github.astradlcs.TaskCraft.desktop"
+    if [ ! -f "$desktop" ]; then
+        mkdir -p "$apps" "$icons"
+        sed "s|^Exec=.*|Exec=\"$APPIMAGE\" %U|" "$HERE/io.github.astradlcs.TaskCraft.desktop" > "$desktop"
+        cp "$HERE/io.github.astradlcs.TaskCraft.png" "$icons/"
+    fi
+fi
+case "$1" in
+    cli) shift; exec "$HERE/usr/bin/taskcraft-cli" "$@" ;;
+    *) exec "$HERE/usr/bin/taskcraft" "$@" ;;
+esac

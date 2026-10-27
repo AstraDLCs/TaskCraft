@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["apps/taskcraft"]
+
+[workspace.package]
+edition = "2024"
+version = "2.0.0"
+license = "MIT OR Apache-2.0"
+rust-version = "1.99"
+publish = false
+
+# ── Never Crash ────────────────────────────────────────────────
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "warn"
+
+# ── Perfiles ───────────────────────────────────────────────────
+# Desarrollo: código propio rápido de compilar...
+[profile.dev]
+opt-level = 1
+panic = "unwind"
+
+# ...dependencias externas optimizadas (compiladas una vez, quedan en caché).
+[profile.dev.package."*"]
+opt-level = 2
+
+# Release: binario único, compacto y rápido.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+debug = false
+panic = "unwind" # obligatorio para el interceptor del engine
+
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Instalador de Windows (RNF-11b, D19). Lo compila `cargo xtask dist windows` con
+     `wixl` (msitools) o, en Windows, el WiX Toolset 3. Variables: Version y SourceDir. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="TaskCraft" Language="1033" Version="$(var.Version)"
+           Manufacturer="TaskCraft" UpgradeCode="a9a74a27-f4bc-471e-96ab-16c2934776a2">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
+             Description="TaskCraft: plan, coordinate and review the work of several AI agents"/>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of TaskCraft is already installed."/>
+    <Media Id="1" Cabinet="taskcraft.cab" EmbedCab="yes"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="TaskCraft">
+          <Component Id="App" Guid="4da09b8b-e077-4d8d-84ef-a92be30bf7af" Win64="yes">
+            <File Id="TaskcraftExe" Name="taskcraft.exe" Source="$(var.SourceDir)/taskcraft.exe" KeyPath="yes"/>
+            <File Id="CliExe" Name="taskcraft-cli.exe" Source="$(var.SourceDir)/taskcraft-cli.exe"/>
+            <File Id="LicenseMit" Name="LICENSE-MIT.txt" Source="$(var.SourceDir)/LICENSE-MIT.txt"/>
+            <File Id="LicenseApache" Name="LICENSE-APACHE.txt" Source="$(var.SourceDir)/LICENSE-APACHE.txt"/>
+            <File Id="Readme" Name="README.txt" Source="$(var.SourceDir)/README.txt"/>
+            <!-- taskcraft-cli en el PATH del sistema. -->
+            <Environment Id="PathEntry" Name="PATH" Value="[INSTALLDIR]" Permanent="no"
+                         Part="last" Action="set" System="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Component Id="StartMenu" Guid="c794c446-9e15-443e-ac5d-68184e0be776">
+          <Shortcut Id="StartMenuShortcut" Name="TaskCraft" Target="[INSTALLDIR]taskcraft.exe"
+                    WorkingDirectory="INSTALLDIR"/>
+          <RegistryValue Root="HKCU" Key="Software\TaskCraft" Name="shortcut" Type="integer"
+                         Value="1" KeyPath="yes"/>
+        </Component>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Main" Title="TaskCraft" Level="1">
+      <ComponentRef Id="App"/>
+      <ComponentRef Id="StartMenu"/>
+    </Feature>
+  </Product>
+</Wix>

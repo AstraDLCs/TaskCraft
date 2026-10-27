@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=TaskCraft
+GenericName=Task planner for AI agents
+GenericName[es]=Planificador de tareas para agentes de IA
+Comment=Plan, coordinate and review the work of several AI agents
+Comment[es]=Planifica, coordina y revisa el trabajo de varios agentes de IA
+Exec=taskcraft %U
+Icon=io.github.astradlcs.TaskCraft
+Terminal=false
+Categories=Office;ProjectManagement;Development;
+Keywords=tasks;kanban;agents;mcp;planner;tareas;agentes;
+StartupWMClass=io.github.astradlcs.TaskCraft
