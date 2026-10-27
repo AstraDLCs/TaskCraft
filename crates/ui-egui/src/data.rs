@@ -1,7 +1,7 @@
 //! Réplica de lectura que dibujan las vistas. Se reconstruye entera cuando
 //! cambia el almacenamiento (`change_token`); las vistas nunca leen del engine.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui::Color32;
 use engine::lookup::Keys;
@@ -730,7 +730,8 @@ pub struct Detail {
     /// Tareas que la mencionan con `[[CLAVE]]` (RF-REL-04).
     pub mentioned_by: Vec<TaskRef>,
     pub time: TaskTime,
-    pub cost: TaskCost,
+    /// Recorrido por las columnas (`task.timeline`).
+    pub journey: Journey,
     /// Ramas, commits y PRs vinculados (RF-INT-04).
     pub git: Vec<model::GitLink>,
 }
@@ -748,71 +749,88 @@ pub struct TaskTime {
     pub running_elsewhere: Option<String>,
 }
 
-/// Coste reportado por los agentes (RF-HIS-06) en la tarea y sus subtareas.
+/// Recorrido de una tarea por las columnas del flujo (`task.timeline`).
 #[derive(Debug, Clone, Default)]
-pub struct TaskCost {
-    /// Por actor: nombre, tokens (entrada + salida) e importe por moneda.
-    pub by_actor: Vec<CostLine>,
-    pub total: CostLine,
+pub struct Journey {
+    pub steps: Vec<JourneyStep>,
+    pub done_at: Option<Timestamp>,
+    /// Última entrada en hecha o cancelada; el total se para ahí.
+    pub closed_at: Option<Timestamp>,
+    pub total_minutes: Option<i64>,
+    /// El motor no pudo calcularlo: su mensaje.
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CostLine {
-    pub who: String,
-    pub tokens: u64,
-    /// Millonésimas por moneda.
-    pub amounts: BTreeMap<String, u64>,
+/// Un tramo: la columna, cuándo entró y salió (`None` = sigue ahí), cuánto
+/// estuvo y quién la llevó.
+#[derive(Debug, Clone)]
+pub struct JourneyStep {
+    pub column: String,
+    pub status: Option<Status>,
+    pub entered_at: Option<Timestamp>,
+    pub left_at: Option<Timestamp>,
+    pub minutes: Option<i64>,
+    pub actor: String,
 }
 
-impl CostLine {
-    fn add(&mut self, e: &model::CostEntry) {
-        self.tokens = self
-            .tokens
-            .saturating_add(e.tokens_in)
-            .saturating_add(e.tokens_out);
-        let slot = self.amounts.entry(e.currency.clone()).or_default();
-        *slot = slot.saturating_add(e.amount_micros);
-    }
-
-    /// `0.42 USD`, o `0.42 USD + 1.10 EUR`; vacío si no hay importe.
-    pub fn amount_text(&self) -> String {
-        self.amounts
-            .iter()
-            .filter(|(_, m)| **m > 0)
-            .map(|(c, m)| format!("{} {c}", rules::cost::format_amount(*m)))
-            .collect::<Vec<_>>()
-            .join(" + ")
-    }
-}
-
-fn task_cost(r: &dyn Reader, task: &Task) -> Result<TaskCost, EngineError> {
-    let mut cost = TaskCost::default();
-    for t in engine::lookup::subtree(r, task.clone())? {
-        for e in r.cost_entries(&store::CostFilter {
-            task: Some(t.id),
-            ..store::CostFilter::default()
-        })? {
-            let who = views::actor_name(r, &e.actor)?;
-            match cost.by_actor.iter_mut().find(|l| l.who == who) {
-                Some(line) => line.add(&e),
-                None => {
-                    let mut line = CostLine {
-                        who,
-                        ..CostLine::default()
-                    };
-                    line.add(&e);
-                    cost.by_actor.push(line);
-                }
-            }
-            cost.total.add(&e);
+impl Journey {
+    /// Tolera campos ausentes o `null`: lo que falta queda vacío.
+    pub fn from_json(v: &serde_json::Value) -> Self {
+        let text = |v: &serde_json::Value, k: &str| {
+            v.get(k)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let stamp = |v: &serde_json::Value, k: &str| {
+            v.get(k)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| s.parse::<Timestamp>().ok())
+        };
+        let minutes = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_i64);
+        let steps = v
+            .get("steps")
+            .and_then(serde_json::Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .map(|s| {
+                        let column = match text(s, "column") {
+                            c if c.is_empty() => text(s, "stage"),
+                            c => c,
+                        };
+                        let name = match text(s, "actor_name") {
+                            n if n.is_empty() => text(s, "actor"),
+                            n => n,
+                        };
+                        JourneyStep {
+                            column,
+                            status: text(s, "status").parse().ok(),
+                            entered_at: stamp(s, "entered_at"),
+                            left_at: stamp(s, "left_at"),
+                            minutes: minutes(s, "minutes"),
+                            actor: name,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            steps,
+            done_at: stamp(v, "done_at"),
+            closed_at: stamp(v, "closed_at"),
+            total_minutes: minutes(v, "total_minutes"),
+            error: None,
         }
     }
-    Ok(cost)
 }
 
-pub fn load_detail(conn: &mut Conn, id: TaskId) -> Result<Option<Detail>, EngineError> {
+pub fn load_detail(
+    conn: &mut Conn,
+    id: TaskId,
+    lang: i18n::Lang,
+) -> Result<Option<Detail>, EngineError> {
     let now = Timestamp::now();
-    conn.read(|r| {
+    let detail = conn.read(|r| {
         let Some(task) = r.task(id)? else {
             return Ok(None);
         };
@@ -910,10 +928,9 @@ pub fn load_detail(conn: &mut Conn, id: TaskId) -> Result<Option<Detail>, Engine
             }
         }
         let time = task_time(r, &keys, task.id, now)?;
-        let cost = task_cost(r, &task)?;
         Ok(Some(Detail {
             time,
-            cost,
+            journey: Journey::default(),
             git: r.git_links(Some(task.id))?,
             blocked_by: refs(r.blockers_of(task.id)?)?,
             blocks: refs(r.blocks(task.id)?)?,
@@ -929,7 +946,19 @@ pub fn load_detail(conn: &mut Conn, id: TaskId) -> Result<Option<Detail>, Engine
             history,
             blocker_options,
         }))
-    })
+    })?;
+    // El recorrido lo calcula el motor; si no puede, se ve su error.
+    Ok(detail.map(|mut d| {
+        let args = engine::Args::none().with("task", d.row.key.as_str());
+        d.journey = match conn.dispatch("task.timeline", &args, lang) {
+            Ok(v) => Journey::from_json(&v),
+            Err(e) => Journey {
+                error: Some(e.to_string()),
+                ..Journey::default()
+            },
+        };
+        d
+    }))
 }
 
 /// Proyecto mínimo para los tests de vistas.

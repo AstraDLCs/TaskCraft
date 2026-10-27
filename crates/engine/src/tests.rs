@@ -396,6 +396,47 @@ fn failed_command_leaves_nothing_behind() {
     assert!(t.fail("project.get", &[("project", Boom::KEY)]).key() == "notfound-project");
 }
 
+/// Leer no confirma nada: el token de cambios (con el que la app y el
+/// daemon saben que hay que recargar) solo se mueve al escribir.
+#[test]
+fn read_only_commands_do_not_move_the_change_token() {
+    let mut t = T::with_tasks(1);
+    let before = t.engine.change_token().unwrap();
+    for (id, args) in [
+        ("task.get", vec![("task", "API-1")]),
+        ("task.list", vec![]),
+        ("task.timeline", vec![("task", "API-1")]),
+        ("metrics.flow", vec![]),
+        ("metrics.cfd", vec![]),
+        ("metrics.burndown", vec![]),
+        ("time.sheet", vec![("days", "7")]),
+    ] {
+        t.run(id, &args);
+        assert_eq!(t.engine.change_token().unwrap(), before, "{id}");
+    }
+    t.run("task.update", &[("task", "API-1"), ("title", "otro")]);
+    assert_ne!(
+        t.engine.change_token().unwrap(),
+        before,
+        "escribir sí lo mueve"
+    );
+}
+
+/// `time.sheet` acepta `days`, como las métricas.
+#[test]
+fn time_sheet_takes_days() {
+    let mut t = T::with_tasks(0);
+    let sheet = t.run("time.sheet", &[("days", "7")]);
+    let day = |k: &str| {
+        sheet[k]
+            .as_str()
+            .unwrap()
+            .parse::<jiff::civil::Date>()
+            .unwrap()
+    };
+    assert_eq!(day("to").since(day("from")).unwrap().get_days(), 6);
+}
+
 #[test]
 fn every_command_has_a_description_in_both_languages() {
     let mut t = T::new();
@@ -746,3 +787,9 @@ mod m15;
 
 #[path = "tests_data.rs"]
 mod data;
+
+#[path = "tests_journey.rs"]
+mod journey;
+
+#[path = "tests_flow.rs"]
+mod flow;

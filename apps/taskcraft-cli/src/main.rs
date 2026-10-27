@@ -188,7 +188,7 @@ fn backend(db: &Path, global: &Global) -> Result<Box<dyn Dispatch>, String> {
             .map(|c| Box::new(c) as Box<dyn Dispatch>)
             .map_err(|e| e.localize(lang));
     }
-    let store = server::open_store(db).map_err(|e| {
+    let mut engine = server::open_engine(db).map_err(|e| {
         tr(
             lang,
             &Msg::new("cli-open-failed")
@@ -196,10 +196,6 @@ fn backend(db: &Path, global: &Global) -> Result<Box<dyn Dispatch>, String> {
                 .arg("error", e.localize(lang)),
         )
     })?;
-    let mut engine = Engine::new(store);
-    if let Some(home) = server::home(db) {
-        engine.set_home(home);
-    }
     // Igual que el daemon (D15): el token es de una interfaz y `--agent`
     // elige uno de sus agentes; sin token, el supervisor local.
     let actor = engine

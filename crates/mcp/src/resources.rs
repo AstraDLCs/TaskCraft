@@ -202,9 +202,8 @@ pub fn prompt(
              status_create owner=<agent> if it does not exist). Nobody has to approve it.\n\
              5. If you are blocked, use task_escalate with a precise question, or task_release \
              with a reason.\n\
-             6. If you know the tokens or the cost of your work, report them with cost_report \
-             (tokens_in, tokens_out, amount, model) before moving on. Put the task key in your \
-             commit messages so they get linked, and record pull requests with git_link.",
+             6. Put the task key in your commit messages so they get linked, and record pull \
+             requests with git_link.",
             project_arg = if project.is_empty() {
                 String::new()
             } else {

@@ -20,6 +20,7 @@ mod task;
 mod template;
 mod text_enum;
 mod time;
+mod transition;
 mod view;
 mod when;
 mod workflow;
@@ -39,7 +40,7 @@ pub use git::{GitKind, GitLink};
 pub use ids::{
     ActivityId, AttachmentId, AutomationId, CommentId, CostEntryId, CycleId, DeliveryId, DiagramId,
     EpicId, GitLinkId, InboxId, ItemId, LabelId, ProjectId, SessionId, TaskId, TemplateId,
-    TimeEntryId, ViewId, WebhookId, WorkspaceId,
+    TimeEntryId, TransitionId, ViewId, WebhookId, WorkspaceId,
 };
 pub use inbox::{InboxItem, InboxKind, InboxStatus};
 pub use jiff::Timestamp;
@@ -53,6 +54,7 @@ pub use task::{
 };
 pub use template::{Template, TemplateKind};
 pub use time::{TimeEntry, TimeSource};
+pub use transition::Transition;
 pub use view::SavedView;
 pub use when::When;
 pub use workflow::{Estimate, EstimateUnit, FieldDef, FieldKind, StatusDef};

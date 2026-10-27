@@ -8,7 +8,7 @@
 use model::{
     Action, ActivityEntry, ActivityId, Agent, AgentId, AgentSession, Comment, Dependency,
     EntityKind, FieldChange, InboxId, InboxItem, InboxStatus, Label, LabelId, Project, ProjectId,
-    SessionId, Task, TaskId, Timestamp, WorkspaceInfo,
+    SessionId, Status, Task, TaskId, Timestamp, Transition, WorkspaceInfo,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -47,9 +47,32 @@ impl Change {
     }
 }
 
+/// Un paso del recorrido de una tarea pendiente de guardar (D24): el engine
+/// le pone quién y cuándo, igual que al historial.
+pub(crate) struct Step {
+    task: TaskId,
+    project: ProjectId,
+    from: Option<(Status, Option<String>)>,
+    to: (Status, Option<String>),
+}
+
+impl Step {
+    pub(crate) fn into_transition(self, ctx: &Context, at: Timestamp) -> Transition {
+        Transition::new(
+            self.task,
+            self.project,
+            self.from,
+            self.to,
+            ctx.actor.clone(),
+            at,
+        )
+    }
+}
+
 pub(crate) struct Recorder<'a> {
     inner: &'a mut dyn Writer,
     changes: Vec<Change>,
+    steps: Vec<Step>,
 }
 
 impl<'a> Recorder<'a> {
@@ -57,11 +80,13 @@ impl<'a> Recorder<'a> {
         Self {
             inner,
             changes: Vec::new(),
+            steps: Vec::new(),
         }
     }
 
-    pub(crate) fn into_changes(self) -> Vec<Change> {
-        self.changes
+    /// Lo que va al historial y los pasos del recorrido de las tareas.
+    pub(crate) fn into_parts(self) -> (Vec<Change>, Vec<Step>) {
+        (self.changes, self.steps)
     }
 
     /// Tareas que lo registrado hasta ahora pasó a hecho (D17).
@@ -316,6 +341,12 @@ impl Reader for Recorder<'_> {
         self.inner.time_entries(filter)
     }
 
+    fn transitions(&self, filter: &store::TransitionFilter) -> StoreResult<Vec<model::Transition>> {
+        self.inner.transitions(filter)
+    }
+    fn tasks_without_transitions(&self) -> StoreResult<Vec<TaskId>> {
+        self.inner.tasks_without_transitions()
+    }
     fn cost_entries(&self, filter: &store::CostFilter) -> StoreResult<Vec<model::CostEntry>> {
         self.inner.cost_entries(filter)
     }
@@ -423,12 +454,30 @@ impl Writer for Recorder<'_> {
     fn insert_task(&mut self, t: &Task) -> StoreResult<()> {
         self.inner.insert_task(t)?;
         self.push(task_change(Action::Created, t, diff(None, t)));
+        self.steps.push(Step {
+            task: t.id,
+            project: t.project_id,
+            from: None,
+            to: (t.status, t.stage.clone()),
+        });
         Ok(())
     }
 
     fn update_task(&mut self, t: &Task) -> StoreResult<()> {
         let before = self.inner.task(t.id)?;
         self.inner.update_task(t)?;
+        // Cambió de estado o de columna: un paso más del recorrido (D24).
+        if let Some(b) = before
+            .as_ref()
+            .filter(|b| b.status != t.status || b.stage != t.stage)
+        {
+            self.steps.push(Step {
+                task: t.id,
+                project: t.project_id,
+                from: Some((b.status, b.stage.clone())),
+                to: (t.status, t.stage.clone()),
+            });
+        }
         let mut changes = diff(before.as_ref(), t);
         // Renovar el lease (mismo agente y mismo inicio) no es un cambio que
         // interese al historial: sería una entrada por latido.
@@ -754,6 +803,10 @@ impl Writer for Recorder<'_> {
         self.inner.update_time_entry(e)?;
         self.push(time_change(Action::Updated, e, diff(before.as_ref(), e)));
         Ok(())
+    }
+
+    fn insert_transition(&mut self, t: &model::Transition) -> StoreResult<()> {
+        self.inner.insert_transition(t)
     }
 
     fn insert_cost_entry(&mut self, e: &model::CostEntry) -> StoreResult<()> {

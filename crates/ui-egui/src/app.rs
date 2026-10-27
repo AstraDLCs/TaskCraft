@@ -251,6 +251,12 @@ impl TaskCraftApp {
         self.conn.set_waker(wake);
     }
 
+    /// Dibuja los diagramas en un hilo aparte para que el zoom no congele la
+    /// ventana (TC-3). Sin llamarlo (tests), se dibujan en el fotograma.
+    pub fn draw_diagrams_in_background(&mut self) {
+        self.md.diagrams.in_background();
+    }
+
     /// Permite cambiar de workspace desde el menú.
     pub fn set_workspaces(&mut self, workspaces: Workspaces) {
         self.workspaces = Some(workspaces);
@@ -336,7 +342,9 @@ impl TaskCraftApp {
             }
         }
         self.detail = match self.st.selected {
-            Some(id) => data::load_detail(&mut self.conn, id).ok().flatten(),
+            Some(id) => data::load_detail(&mut self.conn, id, self.st.lang)
+                .ok()
+                .flatten(),
             None => None,
         };
         match &self.detail {
@@ -348,7 +356,8 @@ impl TaskCraftApp {
         }
     }
 
-    /// Pide las métricas del alcance actual (RF-INT-06, RF-HIS-05).
+    /// Pide las métricas del alcance actual (RF-INT-06, RF-HIS-05). Sin
+    /// proyecto, el motor agrega todos los del alcance.
     fn load_metrics(&mut self) {
         let lang = self.st.lang;
         let days = self.st.metrics.days.to_string();
@@ -356,55 +365,34 @@ impl TaskCraftApp {
             Scope::Project(id) => self.snap.project(id).map(|p| p.key.clone()),
             Scope::All => None,
         };
-        let mut get = |id: &str, args: Args| {
-            self.conn
-                .dispatch(id, &args, lang)
-                .unwrap_or(serde_json::Value::Null)
+        let args = |extra: Args| {
+            let extra = extra.with("days", days.as_str());
+            match &project {
+                Some(key) => extra.with("project", key.as_str()),
+                None => extra,
+            }
         };
-        let per_project = |extra: Args| match &project {
-            Some(key) => extra.with("project", key.as_str()),
-            None => extra,
+        let mut errors = Vec::new();
+        let mut get = |id: &str, args: Args| match self.conn.dispatch(id, &args, lang) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(format!("{id}: {e}"));
+                serde_json::Value::Null
+            }
         };
-        let (burndown, cfd) = match &project {
-            Some(key) => (
-                get(
-                    "metrics.burndown",
-                    Args::none()
-                        .with("project", key.as_str())
-                        .with("days", days.as_str()),
-                ),
-                get(
-                    "metrics.cfd",
-                    Args::none()
-                        .with("project", key.as_str())
-                        .with("days", days.as_str()),
-                ),
-            ),
-            None => (serde_json::Value::Null, serde_json::Value::Null),
-        };
-        let agents = get("metrics.agents", Args::none().with("days", days.as_str()));
+        let burndown = get("metrics.burndown", args(Args::none()));
+        let cfd = get("metrics.cfd", args(Args::none()));
+        let flow = get("metrics.flow", args(Args::none()));
         let sheet = get(
             "time.sheet",
-            per_project(
-                Args::none()
-                    .with("period", self.st.metrics.period)
-                    .with("days", days.as_str()),
-            ),
-        );
-        let cost = get(
-            "cost.summary",
-            per_project(
-                Args::none()
-                    .with("group", "agent")
-                    .with("days", days.as_str()),
-            ),
+            args(Args::none().with("period", self.st.metrics.period)),
         );
         self.st.metrics.data = Some(crate::state::MetricsData {
             burndown,
             cfd,
-            agents,
+            flow,
             sheet,
-            cost,
+            errors,
         });
         self.st.metrics.scope = Some(self.st.scope);
     }
@@ -1984,6 +1972,8 @@ impl TaskCraftApp {
                 });
         }
         let central = egui::CentralPanel::default().show(ui, |ui| {
+            // Métricas recuerda si se dibujó el fotograma anterior.
+            let metrics_shown = std::mem::take(&mut self.st.metrics.shown);
             if let (Some(d), Some(layout::DetailPlace::Full)) = (&self.detail, plan.detail) {
                 // Sin sitio al lado: el detalle ocupa la vista, con la vuelta a mano.
                 let back = tr(
@@ -2022,9 +2012,11 @@ impl TaskCraftApp {
                     views::diagrams::show(ui, &self.snap, &mut self.st, &mut self.md, &mut out)
                 }
                 ViewKind::Metrics => {
-                    if self.st.metrics.scope != Some(self.st.scope) {
+                    // Al entrar en la vista o cambiar de alcance, se recalculan.
+                    if !metrics_shown || self.st.metrics.scope != Some(self.st.scope) {
                         self.st.metrics.data = None;
                     }
+                    self.st.metrics.shown = true;
                     views::metrics::show(ui, &self.snap, &mut self.st, &mut out)
                 }
             }

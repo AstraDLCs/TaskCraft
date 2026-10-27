@@ -11,6 +11,7 @@ mod context;
 mod error;
 mod guard;
 pub mod identity;
+mod journey;
 pub mod lookup;
 pub mod permissions;
 mod recorder;
@@ -223,7 +224,7 @@ impl Engine {
                 };
                 let value = command.run(&mut cx, args)?;
                 // La importación no dispara eventos: trae historial ajeno.
-                return Ok::<_, EngineError>((value, cx.history, false));
+                return Ok::<_, EngineError>((value, cx.history, Vec::new(), false));
             }
             let mut recorder = Recorder::new(&mut *tx);
             let mut cx = Cx {
@@ -245,18 +246,41 @@ impl Engine {
                 };
                 commands::recurrence::spawn_next(&mut cx, id)?;
             }
-            let entries = recorder
-                .into_changes()
+            let (changes, steps) = recorder.into_parts();
+            let entries = changes
                 .into_iter()
                 .map(|change| change.into_entry(ctx, id, now))
                 .collect();
-            Ok((value, entries, true))
+            let transitions = steps
+                .into_iter()
+                .map(|step| step.into_transition(ctx, now))
+                .collect();
+            Ok((value, entries, transitions, true))
         }));
         match outcome {
-            Ok(Ok((value, entries, live))) => {
-                // El historial entra en la misma transacción que los cambios.
+            // Un comando de solo lectura que no dejó nada que guardar no se
+            // confirma: `tx` se descarta (rollback) y el token de cambios no
+            // se mueve, así que leer no hace recargar a nadie.
+            Ok(Ok((value, entries, transitions, true)))
+                if !command.mutates() && entries.is_empty() && transitions.is_empty() =>
+            {
+                Ok((value, Vec::new()))
+            }
+            Ok(Ok((value, entries, transitions, live))) => {
+                // El historial y el recorrido entran en la misma transacción
+                // que los cambios.
                 for entry in &entries {
                     tx.append_activity(entry)?;
+                }
+                for transition in &transitions {
+                    tx.insert_transition(transition)?;
+                }
+                // Lo importado de un archivo anterior a D24 trae historial,
+                // pero no recorrido: se reconstruye, ya con ese historial. Y
+                // lo que la fusión cambió en tareas que ya existían se cierra.
+                if !live {
+                    journey::backfill(&mut *tx)?;
+                    journey::reconcile(&mut *tx)?;
                 }
                 // Y los webhooks se encolan con ellos (RF-INT-02).
                 let events = if live {
@@ -284,6 +308,21 @@ impl Engine {
         {
             listener(token);
         }
+    }
+
+    /// Rellena el recorrido de las tareas que aún no lo tienen (D24). Se
+    /// llama al abrir el workspace; si no falta nada, es una sola consulta.
+    pub fn backfill_transitions(&mut self) -> Result<usize, EngineError> {
+        // Primero una lectura: escribir pide el lock, y casi nunca falta nada.
+        if self.read(|r| Ok(r.tasks_without_transitions()?.is_empty()))? {
+            return Ok(0);
+        }
+        let mut tx = self.store.begin()?;
+        let written = journey::backfill(&mut *tx)?;
+        if written > 0 {
+            tx.commit()?;
+        }
+        Ok(written)
     }
 
     /// Lectura tipada y consistente, sin posibilidad de escribir.

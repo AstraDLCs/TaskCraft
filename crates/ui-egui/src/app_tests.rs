@@ -635,7 +635,7 @@ fn metrics_and_timer_from_the_app() {
         .unwrap()
         .clone();
     assert_eq!(last["done"], 1);
-    assert!(data.agents["items"].is_array());
+    assert_eq!(data.flow["summary"]["done"], 1);
 
     app.apply(Intent::Select(Some(app.snap.rows[1].id())));
     run(&mut app, "timer.start", &[("task", "API-3")]);
@@ -1015,10 +1015,10 @@ fn inline_boxes_submit_on_enter() {
     assert_eq!(child.task.parent_id, Some(api2));
 }
 
-/// M12: el detalle trae el coste (con el de las subtareas) y los vínculos con
-/// git, y se dibuja con ellos.
+/// M12: el detalle trae los vínculos con git y se dibuja con ellos; el coste
+/// ya no se muestra.
 #[test]
-fn detail_shows_cost_and_git_links() {
+fn detail_shows_git_links() {
     let mut app = app_with_tasks();
     let sha = "0123456789abcdef0123456789abcdef01234567";
     app.apply(Intent::run(
@@ -1030,16 +1030,10 @@ fn detail_shows_cost_and_git_links() {
             ("title", "arreglo"),
         ],
     ));
-    app.apply(Intent::run(
-        "cost.report",
-        &[("task", "API-3"), ("tokens_in", "1500"), ("amount", "0.25")],
-    ));
     let api1 = app.snap.rows[0].id();
     app.apply(Intent::Select(Some(api1)));
     let d = app.detail.as_ref().unwrap();
     assert_eq!(d.git.len(), 1);
-    assert_eq!(d.cost.total.tokens, 1500, "incluye la subtarea API-3");
-    assert_eq!(d.cost.total.amount_text(), "0.25 USD");
     let ctx = egui::Context::default();
     frame(&mut app, &ctx, vec![]);
     frame(&mut app, &ctx, vec![]);
@@ -1410,4 +1404,392 @@ fn deleting_a_project_from_the_data_menu_saves_a_copy_first() {
                 .to_string_lossy()
                 .starts_with("antes-de-borrar-"))
     );
+}
+
+/// TC-1: la vista Diagramas tiene un visor con zoom; «+» amplía y «Ajustar»
+/// vuelve a encajarlo.
+#[test]
+fn the_diagram_viewer_zooms_with_its_buttons() {
+    let mut app = app_with_tasks();
+    app.apply(Intent::run(
+        "diagram.create",
+        &[
+            ("project", "API"),
+            ("title", "Flujo"),
+            (
+                "source",
+                "flowchart LR\n  A[Inicio] --> B[Medio] --> C[Fin]",
+            ),
+        ],
+    ));
+    app.apply(Intent::OpenDiagram("API-D1".into()));
+    let mut h = sidebar_harness(app);
+    h.run();
+    // El porcentaje del visor: por etiqueta o por valor según el widget.
+    let labels = |h: &egui_kittest::Harness<'_, TaskCraftApp>| -> Vec<String> {
+        let by_label = h
+            .query_all(egui_kittest::kittest::By::new().label_contains(" %"))
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label());
+        let by_value = h
+            .query_all(egui_kittest::kittest::By::new())
+            .filter_map(|n| n.value())
+            .filter(|v| v.ends_with(" %"));
+        by_label.chain(by_value).collect()
+    };
+    // Un diagrama pequeño encaja a su tamaño natural: 100 %.
+    assert!(!labels(&h).iter().any(|l| l == "125 %"), "{:?}", labels(&h));
+    h.get_by_label("+").click();
+    h.run();
+    assert!(labels(&h).iter().any(|l| l == "125 %"), "{:?}", labels(&h));
+    h.get_by_label("Ajustar").click();
+    h.run();
+    assert!(!labels(&h).iter().any(|l| l == "125 %"), "{:?}", labels(&h));
+}
+
+/// TC-2: sobre el visor, la rueda (o dos dedos en vertical) amplía y
+/// reduce, y el pellizco y Ctrl+rueda también amplían.
+#[test]
+fn the_wheel_and_pinch_zoom_the_diagram_viewer() {
+    let mut h = sidebar_harness(app_with_diagram());
+    h.run();
+    let start = viewer_zoom(&h);
+    let up = viewer_gesture(&mut h, wheel(120.0, egui::Modifiers::NONE));
+    assert!(up > start, "la rueda amplía: {start} → {up}");
+    let down = viewer_gesture(&mut h, wheel(-240.0, egui::Modifiers::NONE));
+    assert!(down < up, "y reduce: {up} → {down}");
+    let pinch = viewer_gesture(&mut h, egui::Event::Zoom(1.5));
+    assert!(pinch > down, "el pellizco amplía: {down} → {pinch}");
+    let ctrl = viewer_gesture(&mut h, wheel(120.0, egui::Modifiers::CTRL));
+    assert!(ctrl > pinch, "Ctrl+rueda amplía: {pinch} → {ctrl}");
+    let shift = viewer_gesture(&mut h, wheel(120.0, egui::Modifiers::SHIFT));
+    assert_eq!(shift, ctrl, "Shift+rueda desplaza sin ampliar");
+}
+
+/// TC-2: en el editor la vista previa va dentro de una página con scroll; la
+/// rueda sigue siendo de la página y solo Ctrl+rueda (o el pellizco) amplía.
+#[test]
+fn the_wheel_scrolls_the_editor_instead_of_zooming_its_preview() {
+    let mut app = app_with_diagram();
+    app.st.diagrams.editor = app
+        .snap
+        .diagram_by_key("API-D1")
+        .map(|d| crate::state::DiagramEditor::edit(&d.diagram));
+    let mut h = sidebar_harness(app);
+    h.run();
+    let start = viewer_zoom(&h);
+    let wheel_only = viewer_gesture(&mut h, wheel(120.0, egui::Modifiers::NONE));
+    assert_eq!(wheel_only, start, "la rueda no amplía la vista previa");
+    let ctrl = viewer_gesture(&mut h, wheel(120.0, egui::Modifiers::CTRL));
+    assert!(ctrl > start, "Ctrl+rueda sí: {start} → {ctrl}");
+}
+
+fn app_with_diagram() -> TaskCraftApp {
+    let mut app = app_with_tasks();
+    app.apply(Intent::run(
+        "diagram.create",
+        &[
+            ("project", "API"),
+            ("title", "F"),
+            (
+                "source",
+                "flowchart LR\n  A[Inicio] --> B[Medio] --> C[Fin]",
+            ),
+        ],
+    ));
+    app.apply(Intent::OpenDiagram("API-D1".into()));
+    app
+}
+
+/// El zoom que muestra la etiqueta «N %» de la barra del visor.
+fn zoom_label(n: &egui_kittest::Node<'_>) -> Option<f32> {
+    n.value()?.strip_suffix(" %")?.trim().parse().ok()
+}
+
+fn viewer_zoom_node<'a>(h: &'a egui_kittest::Harness<'_, TaskCraftApp>) -> egui_kittest::Node<'a> {
+    h.query_all(egui_kittest::kittest::By::new())
+        .find(|n| zoom_label(n).is_some())
+        .expect("etiqueta de zoom")
+}
+
+fn viewer_zoom(h: &egui_kittest::Harness<'_, TaskCraftApp>) -> f32 {
+    zoom_label(&viewer_zoom_node(h)).unwrap_or(0.0)
+}
+
+fn wheel(dy: f32, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, dy),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers,
+    }
+}
+
+/// Envía `event` con el cursor sobre el lienzo, justo bajo la barra del
+/// visor, y devuelve el zoom resultante.
+fn viewer_gesture(h: &mut egui_kittest::Harness<'_, TaskCraftApp>, event: egui::Event) -> f32 {
+    let bar = viewer_zoom_node(h).rect();
+    h.hover_at(egui::pos2(bar.center().x + 40.0, bar.max.y + 60.0));
+    h.run();
+    h.event(event);
+    h.run();
+    viewer_zoom(h)
+}
+
+/// TC-6: guion con traspasos a la columna de un agente y una devolución.
+fn app_with_flow() -> TaskCraftApp {
+    let mut app = app_with_tasks();
+    run(
+        &mut app,
+        "interface.register",
+        &[("name", "Claude Code"), ("kind", "claude-code")],
+    );
+    run(
+        &mut app,
+        "agent.register",
+        &[("name", "dev"), ("interface", "Claude Code")],
+    );
+    run(
+        &mut app,
+        "status.create",
+        &[
+            ("project", "API"),
+            ("name", "Cola de dev"),
+            ("base", "todo"),
+            ("owner", "dev"),
+        ],
+    );
+    for (task, status) in [
+        ("API-1", "cola_de_dev"),
+        ("API-1", "in_progress"),
+        ("API-1", "cola_de_dev"),
+        ("API-1", "in_progress"),
+        ("API-1", "done"),
+        ("API-2", "in_progress"),
+        ("API-2", "done"),
+    ] {
+        run(&mut app, "task.move", &[("task", task), ("status", status)]);
+    }
+    app.st.view = ViewKind::Metrics;
+    app
+}
+
+fn metrics_harness(app: TaskCraftApp) -> egui_kittest::Harness<'static, TaskCraftApp> {
+    egui_kittest::Harness::builder()
+        .with_size(egui::vec2(1440.0, 1400.0))
+        .with_max_steps(8)
+        .with_accessibility_check(false)
+        .build_ui_state(|ui, app: &mut TaskCraftApp| app.draw(ui), app)
+}
+
+/// TC-6: las tarjetas muestran las cifras del flujo, también con «Todos»,
+/// y la vista ya no tiene coste.
+#[test]
+fn metrics_cards_show_the_flow_figures() {
+    let mut app = app_with_flow();
+    app.st.scope = Scope::All;
+    app.apply(Intent::LoadMetrics);
+    let data = app.st.metrics.data.clone().unwrap();
+    assert!(data.errors.is_empty(), "{:?}", data.errors);
+    let summary = &data.flow["summary"];
+    assert_eq!(summary["done"], 2);
+    assert_eq!(summary["returns"], 1, "API-1 volvió a la cola de dev");
+    assert_eq!(summary["returned_pct"].as_f64(), Some(50.0));
+    assert!(
+        !data.burndown["series"].as_array().unwrap().is_empty(),
+        "con Todos, burndown agregado"
+    );
+    assert!(!data.cfd["series"].as_array().unwrap().is_empty());
+    let dev = data.flow["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["actor_name"] == "dev")
+        .cloned();
+    assert_eq!(dev.map(|a| a["returns_received"].clone()), Some(1.into()));
+
+    let mut h = metrics_harness(app);
+    h.run();
+    // Cada tarjeta se anuncia como «título: valor».
+    for label in [
+        "Hechas: 2",
+        "Con devolución: 50 %",
+        "1 devolución",
+        "Cola de dev",
+    ] {
+        assert!(h.query_all_by_label(label).count() > 0, "falta «{label}»");
+    }
+    assert!(
+        h.query_by_label_contains("devoluciones").is_none(),
+        "singular"
+    );
+    assert!(h.query_by_label_contains("Coste").is_none());
+    assert!(h.query_by_label_contains("Elige un proyecto").is_none());
+}
+
+/// Sin tareas hechas: las tarjetas que no se pueden calcular dicen «—».
+#[test]
+fn metrics_without_data_show_dashes() {
+    let mut app = app_with_tasks();
+    app.st.view = ViewKind::Metrics;
+    app.apply(Intent::LoadMetrics);
+    let mut h = metrics_harness(app);
+    h.run();
+    for label in ["Hechas: 0", "Lead time (p50): —", "Cycle time (p50): —"] {
+        assert!(h.query_by_label(label).is_some(), "falta «{label}»");
+    }
+    assert!(h.query_by_label_contains("Coste").is_none());
+}
+
+/// Al pasar de un proyecto a «Todos» se recalcula con el agregado, y al
+/// volver a la vista desde otra, también.
+#[test]
+fn metrics_reload_on_scope_change_and_on_entering() {
+    let app = app_with_flow();
+    let Scope::Project(api) = app.st.scope else {
+        panic!("dentro del proyecto");
+    };
+    let mut h = metrics_harness(app);
+    h.run();
+    let data =
+        |h: &egui_kittest::Harness<'_, TaskCraftApp>| h.state().st.metrics.data.clone().unwrap();
+    assert_eq!(data(&h).burndown["project"], "API");
+    assert_eq!(h.state().st.metrics.scope, Some(Scope::Project(api)));
+
+    h.state_mut().go_to(GoTo::project(Scope::All));
+    h.state_mut().st.view = ViewKind::Metrics;
+    h.run();
+    assert_eq!(h.state().st.metrics.scope, Some(Scope::All));
+    assert!(data(&h).burndown["project"].is_null(), "agregado");
+
+    // Fuera de la vista se hace otra tarea; al volver, la cuenta está al día.
+    h.state_mut().st.view = ViewKind::List;
+    h.run();
+    for s in ["in_progress", "done"] {
+        h.state_mut().apply(Intent::run(
+            "task.move",
+            &[("task", "API-3"), ("status", s)],
+        ));
+    }
+    h.state_mut().st.view = ViewKind::Metrics;
+    h.run();
+    assert_eq!(data(&h).flow["summary"]["done"], 3);
+}
+
+/// `task.timeline` con campos ausentes o `null`: lo que falta queda vacío.
+#[test]
+fn the_journey_tolerates_nulls() {
+    let j = crate::data::Journey::from_json(&serde_json::json!({
+        "done_at": null,
+        "total_minutes": null,
+        "steps": [
+            {"status": "todo", "column": null, "stage": "cola_de_dev", "entered_at": null,
+             "left_at": null, "minutes": null, "actor": "agent:x", "actor_name": null},
+            {"status": "nada", "entered_at": "no es una fecha"},
+            {}
+        ]
+    }));
+    assert_eq!(j.steps.len(), 3);
+    let first = &j.steps[0];
+    assert_eq!(first.column, "cola_de_dev");
+    assert_eq!(first.status, Some(model::Status::Todo));
+    assert_eq!(first.actor, "agent:x");
+    assert!(first.entered_at.is_none() && first.minutes.is_none());
+    assert!(j.steps[1].status.is_none() && j.steps[1].entered_at.is_none());
+    assert!(j.done_at.is_none() && j.closed_at.is_none() && j.total_minutes.is_none());
+    assert!(
+        crate::data::Journey::from_json(&serde_json::Value::Null)
+            .steps
+            .is_empty()
+    );
+}
+
+/// TC-6: el recorrido del detalle lista los tramos y cuándo se completó.
+#[test]
+fn the_detail_shows_the_journey() {
+    let mut app = app_with_flow();
+    app.st.view = ViewKind::List;
+    app.open_task("API-1");
+    assert_eq!(
+        app.token,
+        app.conn.change_token(),
+        "pedir el recorrido no deja una recarga pendiente"
+    );
+    let journey = &app.detail.as_ref().unwrap().journey;
+    let columns: Vec<&str> = journey.steps.iter().map(|s| s.column.as_str()).collect();
+    assert!(columns.contains(&"Cola de dev"), "{columns:?}");
+    assert_eq!(
+        columns.iter().filter(|c| **c == "Cola de dev").count(),
+        2,
+        "dos estancias en la cola"
+    );
+    assert!(journey.done_at.is_some());
+    assert!(journey.steps.last().is_some_and(|s| s.left_at.is_none()));
+
+    let mut h = metrics_harness(app);
+    h.run();
+    assert_eq!(h.query_all_by_label("Cola de dev").count(), 2);
+    assert!(h.query_by_label_contains("Completada el").is_some());
+    assert!(
+        h.query_by_label_contains("– ahora").is_none(),
+        "hecha: el último tramo no sigue «ahora»"
+    );
+    // Sin hacer: el tramo actual llega hasta «ahora» y no hay fecha de cierre.
+    h.state_mut().open_task("API-3");
+    h.run();
+    assert!(h.query_by_label_contains("– ahora").is_some());
+    assert!(h.query_by_label_contains("Completada el").is_none());
+}
+
+/// Una tarea cancelada no sigue «en curso»: su cierre es la cancelación.
+#[test]
+fn a_cancelled_task_ends_its_journey() {
+    let mut app = app_with_flow();
+    run(
+        &mut app,
+        "task.move",
+        &[("task", "API-3"), ("status", "cancelled")],
+    );
+    app.st.view = ViewKind::List;
+    app.open_task("API-3");
+    let mut h = metrics_harness(app);
+    h.run();
+    assert!(h.query_by_label_contains("Cancelada el").is_some());
+    assert!(h.query_by_label_contains("Completada el").is_none());
+    assert!(h.query_by_label_contains("– ahora").is_none());
+}
+
+/// Con el detalle abierto y sin daemon, pedir el recorrido (una lectura) no
+/// deja una recarga pendiente; una escritura de otro agente, en cambio, se
+/// detecta y se recarga.
+#[test]
+fn reading_does_not_reload_but_others_writes_do() {
+    let mut app = app_with_flow();
+    app.open_task("API-2");
+    assert_eq!(app.token, app.conn.change_token(), "sin recarga pendiente");
+    let force_poll = |app: &mut TaskCraftApp| {
+        app.last_poll = Instant::now()
+            .checked_sub(POLL * 2)
+            .unwrap_or_else(Instant::now);
+        app.poll();
+    };
+    force_poll(&mut app);
+    assert_eq!(app.token, app.conn.change_token());
+
+    // Otro agente escribe sin pasar por la app.
+    app.conn
+        .dispatch(
+            "task.update",
+            &Args::none()
+                .with("task", "API-2")
+                .with("title", "cambiada fuera")
+                .with("as_agent", "dev"),
+            app.st.lang,
+        )
+        .unwrap();
+    assert_ne!(app.token, app.conn.change_token(), "queda pendiente");
+    force_poll(&mut app);
+    let d = app.detail.as_ref().unwrap();
+    assert_eq!(d.row.task.title, "cambiada fuera");
+    assert_eq!(app.token, app.conn.change_token(), "y no vuelve a recargar");
 }

@@ -30,6 +30,7 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     include_str!("sql/v18.sql"),
     include_str!("sql/v19.sql"),
     include_str!("sql/v20.sql"),
+    include_str!("sql/v21.sql"),
 ];
 
 /// Lleva la base a la última versión. Si ya tenía datos de una versión

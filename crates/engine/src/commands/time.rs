@@ -9,8 +9,9 @@ use jiff::tz::TimeZone;
 use model::{Actor, Status, TaskId, TimeEntry, TimeEntryId, TimeSource, Timestamp};
 use rules::metrics::{self, Interval};
 use serde_json::{Value, json};
-use store::{ActivityFilter, Reader, TaskFilter, TimeFilter};
+use store::{ActivityFilter, Reader, TimeFilter};
 
+use super::flow::{Scope, journey};
 use crate::command::Kind as K;
 use crate::command::command;
 use crate::lookup::{self, Keys};
@@ -26,10 +27,10 @@ command!(
     []
 );
 command!(Log, "time.log", "cmd-time-log", log, write, [req "task": K::Text, req "minutes": K::Int, opt "date": K::Date, opt "note": K::Text]);
-command!(Report, "time.report", "cmd-time-report", report, read, [opt "project": K::Text, opt "task": K::Text, opt "actor": K::Text, opt "from": K::Date, opt "to": K::Date]);
-command!(Sheet, "time.sheet", "cmd-time-sheet", sheet, read, [opt "period": K::Enum(&["day", "week", "month"]), opt "project": K::Text, opt "actor": K::Text, opt "from": K::Date, opt "to": K::Date]);
-command!(Burndown, "metrics.burndown", "cmd-metrics-burndown", burndown, read, [req "project": K::Text, opt "epic": K::Text, opt "days": K::Int]);
-command!(Cfd, "metrics.cfd", "cmd-metrics-cfd", cfd, read, [req "project": K::Text, opt "days": K::Int]);
+command!(Report, "time.report", "cmd-time-report", report, read, [opt "project": K::Text, opt "task": K::Text, opt "actor": K::Text, opt "days": K::Int, opt "from": K::Date, opt "to": K::Date]);
+command!(Sheet, "time.sheet", "cmd-time-sheet", sheet, read, [opt "period": K::Enum(&["day", "week", "month"]), opt "project": K::Text, opt "actor": K::Text, opt "days": K::Int, opt "from": K::Date, opt "to": K::Date]);
+command!(Burndown, "metrics.burndown", "cmd-metrics-burndown", burndown, read, [opt "project": K::Text, opt "epic": K::Text, opt "days": K::Int]);
+command!(Cfd, "metrics.cfd", "cmd-metrics-cfd", cfd, read, [opt "project": K::Text, opt "days": K::Int]);
 command!(Agents, "metrics.agents", "cmd-metrics-agents", agents, read, [opt "days": K::Int]);
 
 fn tz() -> TimeZone {
@@ -47,6 +48,12 @@ pub(super) fn start_of(d: Date) -> Timestamp {
         .unwrap_or(Timestamp::UNIX_EPOCH)
 }
 
+/// Instantes que delimitan los días `[from, to]`: `[inicio de from, inicio
+/// del día siguiente a to)`.
+pub(super) fn bounds(from: Date, to: Date, now: Timestamp) -> (Timestamp, Timestamp) {
+    (start_of(from), to.tomorrow().map(start_of).unwrap_or(now))
+}
+
 pub(super) fn parse_day(args: &Args, key: &str) -> Result<Option<Date>, EngineError> {
     args.get(key)
         .map(|v| crate::args::parse_when(key, v).map(|w| w.date()))
@@ -54,7 +61,11 @@ pub(super) fn parse_day(args: &Args, key: &str) -> Result<Option<Date>, EngineEr
 }
 
 /// Rango `[from, to]` en días locales; por defecto, los últimos `days` días.
-fn range(args: &Args, now: Timestamp, default_days: i64) -> Result<(Date, Date), EngineError> {
+pub(super) fn range(
+    args: &Args,
+    now: Timestamp,
+    default_days: i64,
+) -> Result<(Date, Date), EngineError> {
     let to = parse_day(args, "to")?.unwrap_or_else(|| day_of(now));
     let days = args
         .parse::<i64>("days")?
@@ -218,8 +229,7 @@ fn collect(cx: &Cx<'_>, args: &Args, from: Date, to: Date) -> Result<Vec<Worked>
             Err(_) => lookup::agent(r, a).map(|ag| Actor::Agent(ag.id)),
         })
         .transpose()?;
-    let lo = start_of(from);
-    let hi = to.tomorrow().map(start_of).unwrap_or(cx.now);
+    let (lo, hi) = bounds(from, to, cx.now);
     let wanted =
         |a: &Actor, t: TaskId| actor.as_ref().is_none_or(|x| x == a) && task.is_none_or(|x| x == t);
     let mut out = Vec::new();
@@ -367,7 +377,7 @@ fn sheet(cx: &mut Cx<'_>, args: &Args) -> Result<Value, EngineError> {
 }
 
 /// Días del rango con el instante en que acaba cada uno.
-fn day_cuts(from: Date, to: Date, now: Timestamp) -> Vec<(Date, Timestamp)> {
+pub(super) fn day_cuts(from: Date, to: Date, now: Timestamp) -> Vec<(Date, Timestamp)> {
     let mut out = Vec::new();
     let mut d = from;
     while d <= to {
@@ -381,79 +391,65 @@ fn day_cuts(from: Date, to: Date, now: Timestamp) -> Vec<(Date, Timestamp)> {
     out
 }
 
-/// Pendiente y hecho al final de cada día (RF-INT-06), de un proyecto o de
-/// una de sus épicas.
+/// Pendiente y hecho al final de cada día (RF-INT-06), de un proyecto, de
+/// una épica o de todos los proyectos del alcance. Sale del recorrido (D24).
 fn burndown(cx: &mut Cx<'_>, args: &Args) -> Result<Value, EngineError> {
+    let scope = Scope::load(cx, args)?;
     let r: &dyn Reader = &*cx.tx;
-    let project = lookup::project(r, args.require("project")?)?;
+    let epic = args
+        .get("epic")
+        .map(|e| lookup::epic(r, e, scope.project.as_ref().map(|p| p.id), None))
+        .transpose()?;
     let (from, to) = range(args, cx.now, 30)?;
-    let only: Option<Vec<TaskId>> = match args.get("epic") {
-        Some(e) => {
-            let epic = lookup::epic(r, e, Some(project.id), None)?;
-            Some(
-                r.tasks(&TaskFilter {
-                    include_archived: true,
-                    group: Some(epic.id),
-                    ..TaskFilter::default()
-                })?
-                .iter()
-                .map(|t| t.id)
-                .collect(),
-            )
-        }
-        None => None,
-    };
     let cuts = day_cuts(from, to, cx.now);
-    let states = metrics::status_at(
-        &task_entries(r, Some(project.id))?,
+    let counts = metrics::status_counts(
+        &journey(r, &scope.projects, epic.map(|e| e.id), None)?,
         &cuts.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
     );
     let series: Vec<Value> = cuts
         .iter()
-        .zip(states)
-        .map(|((day, _), state)| {
+        .zip(counts)
+        .map(|((day, _), count)| {
             let mut remaining = 0;
             let mut done = 0;
-            for (task, status) in state {
-                if only.as_ref().is_some_and(|ids| !ids.contains(&task)) {
-                    continue;
-                }
+            for (status, n) in count {
                 match status {
-                    Status::Done => done += 1,
+                    Status::Done => done += n,
                     Status::Cancelled => {}
-                    _ => remaining += 1,
+                    _ => remaining += n,
                 }
             }
             json!({ "date": day.to_string(), "remaining": remaining, "done": done })
         })
         .collect();
-    Ok(json!({ "project": project.key, "series": series }))
+    Ok(json!({ "project": scope.key(), "series": series }))
 }
 
-/// Flujo acumulado (RF-INT-06): tareas en cada estado base al final de cada día.
+/// Flujo acumulado (RF-INT-06): tareas en cada estado base al final de cada
+/// día, de un proyecto o de todos los del alcance. Sale del recorrido (D24).
 fn cfd(cx: &mut Cx<'_>, args: &Args) -> Result<Value, EngineError> {
+    let scope = Scope::load(cx, args)?;
     let r: &dyn Reader = &*cx.tx;
-    let project = lookup::project(r, args.require("project")?)?;
     let (from, to) = range(args, cx.now, 30)?;
     let cuts = day_cuts(from, to, cx.now);
-    let states = metrics::status_at(
-        &task_entries(r, Some(project.id))?,
+    let counts = metrics::status_counts(
+        &journey(r, &scope.projects, None, None)?,
         &cuts.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
     );
     let series: Vec<Value> = cuts
         .iter()
-        .zip(states)
-        .map(|((day, _), state)| {
+        .zip(counts)
+        .map(|((day, _), count)| {
             let mut row = serde_json::Map::new();
             row.insert("date".into(), json!(day.to_string()));
             for s in Status::ALL {
-                let n = state.values().filter(|x| **x == *s).count();
+                let n = count.get(s).copied().unwrap_or(0);
                 row.insert(s.as_str().into(), json!(n));
             }
             Value::Object(row)
         })
         .collect();
-    Ok(json!({ "project": project.key, "series": series }))
+    Ok(json!({ "project": scope.key(), "series": series }))
 }
 
 /// Rendimiento por agente (RF-INT-06): entregas, aprobadas, rechazadas, tasa
@@ -461,8 +457,7 @@ fn cfd(cx: &mut Cx<'_>, args: &Args) -> Result<Value, EngineError> {
 fn agents(cx: &mut Cx<'_>, args: &Args) -> Result<Value, EngineError> {
     let r: &dyn Reader = &*cx.tx;
     let (from, to) = range(args, cx.now, 30)?;
-    let lo = start_of(from);
-    let hi = to.tomorrow().map(start_of).unwrap_or(cx.now);
+    let (lo, hi) = bounds(from, to, cx.now);
     let entries = task_entries(r, None)?;
     let stats = metrics::agent_stats(&entries, lo, hi);
     let mut minutes: HashMap<model::AgentId, i64> = HashMap::new();

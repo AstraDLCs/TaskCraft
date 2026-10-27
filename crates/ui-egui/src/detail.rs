@@ -99,7 +99,7 @@ pub fn show(
             crate::detail_extra::diagrams(ui, detail, snap, lang, out);
             crate::detail_extra::attachments(ui, detail, st, out);
             crate::detail_extra::time(ui, detail, st, out);
-            crate::detail_extra::cost(ui, detail, lang);
+            crate::detail_extra::journey(ui, detail, lang);
             crate::detail_extra::git(ui, detail, lang);
             comments(ui, detail, st, md, out);
             history(ui, detail, lang, out);

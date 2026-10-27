@@ -322,6 +322,16 @@ pub(crate) fn plan_merge(target: &dyn Reader, mut dump: Dump) -> Result<Plan, Ex
         c.actor = actor(&c.actor);
     }
     created.costs = dump.costs.len();
+    // El recorrido de una tarea que ya existe aquí se queda como está.
+    let known: HashSet<_> = target
+        .transitions(&store::TransitionFilter::default())?
+        .iter()
+        .map(|t| t.task_id)
+        .collect();
+    dump.transitions.retain(|t| !known.contains(&t.task_id));
+    for t in &mut dump.transitions {
+        t.actor = actor(&t.actor);
+    }
     let links: HashSet<_> = target.git_links(None)?.iter().map(|l| l.id).collect();
     dump.git_links.retain(|l| !links.contains(&l.id));
     for l in &mut dump.git_links {

@@ -7,6 +7,13 @@ use std::collections::{BTreeMap, HashMap};
 use model::{Action, ActivityEntry, Actor, AgentId, EntityKind, Status, TaskId, Timestamp};
 use serde_json::Value;
 
+// Métricas de flujo sobre el recorrido guardado (TC-5).
+mod flow;
+pub use flow::{
+    AgentFlow, ColumnFlow, Done, Flow, Segment, closed_at, done_at, flow, percentile, segments,
+    status_counts,
+};
+
 /// Un tramo en el que una tarea estuvo en curso a cargo de `actor`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Interval {
@@ -123,31 +130,60 @@ pub fn worked(entries: &[ActivityEntry], now: Timestamp) -> Vec<Interval> {
     out
 }
 
-/// Estado de cada tarea al final de cada instante de `cuts` (para burndown y
-/// flujo acumulado). `None` = no existía todavía o estaba en la papelera.
-pub fn status_at(entries: &[ActivityEntry], cuts: &[Timestamp]) -> Vec<HashMap<TaskId, Status>> {
+/// Un paso del recorrido de una tarea reconstruido del historial (D24), para
+/// las tareas de antes de que el recorrido se guardara aparte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    pub task: TaskId,
+    /// `None` en el primer paso: la tarea se creó así.
+    pub from: Option<(Status, Option<String>)>,
+    pub to: (Status, Option<String>),
+    pub actor: Actor,
+    pub at: Timestamp,
+}
+
+/// El recorrido de cada tarea según el historial: un paso al crearse y otro
+/// por cada cambio de estado o de columna. Si falta el principio (historial
+/// podado), el estado de partida sale del valor anterior de cada cambio.
+pub fn journey(entries: &[ActivityEntry]) -> Vec<Step> {
     let mut sorted: Vec<&ActivityEntry> = entries.iter().filter(|e| is_task_change(e)).collect();
     sorted.sort_by_key(|e| (e.at, e.id));
-    let mut states: HashMap<TaskId, State> = HashMap::new();
-    let mut out = Vec::with_capacity(cuts.len());
-    let mut next = 0;
-    for &cut in cuts {
-        while let Some(e) = sorted.get(next).filter(|e| e.at <= cut) {
-            if let Some(task) = e.task_id {
-                let s = states.entry(task).or_default();
-                s.apply(e);
-                if e.action == Action::Deleted && e.changes.is_empty() {
-                    s.status = None;
-                }
-            }
-            next += 1;
+    let mut states: HashMap<TaskId, (Status, Option<String>)> = HashMap::new();
+    let mut out = Vec::new();
+    for e in sorted {
+        let Some(task) = e.task_id else { continue };
+        let known = states.get(&task).cloned();
+        let field = |name: &str| e.changes.iter().find(|c| c.field == name);
+        let status_of = |v: &Value| v.as_str().and_then(|s| s.parse::<Status>().ok());
+        let stage_of = |v: &Value| v.as_str().map(str::to_owned);
+        let status = field("status");
+        let stage = field("stage");
+        let from = known.clone().or_else(|| {
+            // Primera vez que se ve, sin su creación: lo de antes del cambio.
+            let before = status.and_then(|c| status_of(&c.before))?;
+            Some((before, stage.and_then(|c| stage_of(&c.before))))
+        });
+        let to_status = status.and_then(|c| status_of(&c.after));
+        let to_stage = stage.map(|c| stage_of(&c.after));
+        let to = match (&from, to_status, to_stage) {
+            (_, Some(s), Some(st)) => (s, st),
+            (_, Some(s), None) => (s, from.as_ref().and_then(|f| f.1.clone())),
+            (Some(f), None, Some(st)) => (f.0, st),
+            // Sin estado conocido (inicio podado y solo cambió la columna):
+            // se espera al primer cambio de estado; el relleno cierra el resto.
+            _ => continue,
+        };
+        let created = e.action == Action::Created && known.is_none();
+        if created || from.as_ref() != Some(&to) {
+            out.push(Step {
+                task,
+                from: if created { None } else { from },
+                to: to.clone(),
+                actor: e.actor.clone(),
+                at: e.at,
+            });
         }
-        out.push(
-            states
-                .iter()
-                .filter_map(|(id, s)| s.status.map(|st| (*id, st)))
-                .collect(),
-        );
+        states.insert(task, to);
     }
     out
 }
@@ -284,6 +320,58 @@ mod tests {
         }
     }
 
+    /// D24: sin la creación (historial podado), el punto de partida sale de
+    /// lo que había antes del primer cambio; lo que no es estado ni columna
+    /// no es un paso.
+    #[test]
+    fn the_journey_survives_a_pruned_beginning() {
+        let task = TaskId::generate();
+        let bot = Actor::Agent(AgentId::generate());
+        let mut moved = entry(10, task, bot.clone(), "task.claim", &[]);
+        moved.changes.push(FieldChange {
+            field: "status".into(),
+            before: json!("todo"),
+            after: json!("in_progress"),
+        });
+        let mut queued = entry(20, task, bot.clone(), "task.move", &[]);
+        queued.changes = vec![
+            FieldChange {
+                field: "status".into(),
+                before: json!("in_progress"),
+                after: json!("todo"),
+            },
+            FieldChange {
+                field: "stage".into(),
+                before: Value::Null,
+                after: json!("cola_de_rev"),
+            },
+        ];
+        let renamed = entry(
+            30,
+            task,
+            bot.clone(),
+            "task.update",
+            &[("title", json!("x"))],
+        );
+        let steps = journey(&[renamed, queued, moved]);
+        let path: Vec<_> = steps
+            .iter()
+            .map(|s| (s.from.clone(), s.to.clone()))
+            .collect();
+        assert_eq!(
+            path,
+            vec![
+                (Some((Status::Todo, None)), (Status::InProgress, None)),
+                (
+                    Some((Status::InProgress, None)),
+                    (Status::Todo, Some("cola_de_rev".into()))
+                ),
+            ]
+        );
+        assert!(steps.iter().all(|s| s.actor == bot));
+        assert_eq!(steps[1].at, at(20));
+    }
+
     #[test]
     fn time_goes_to_whoever_has_the_task_in_progress() {
         let task = TaskId::generate();
@@ -328,12 +416,6 @@ mod tests {
         assert_eq!(by_bot, 30, "de la toma a la entrega");
         // Rechazada sin claim ni asignado: nadie la tiene, no cuenta.
         assert_eq!(worked.len(), 1);
-
-        let cuts = [at(5), at(20), at(45)];
-        let states = status_at(&entries, &cuts);
-        assert_eq!(states[0][&task], Status::Todo);
-        assert_eq!(states[1][&task], Status::InProgress);
-        assert_eq!(states[2][&task], Status::InReview);
 
         let stats = agent_stats(&entries, at(0), at(100));
         let s = &stats[&bot];

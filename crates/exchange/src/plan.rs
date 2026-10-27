@@ -295,6 +295,12 @@ fn plan_projects(target: &dyn Reader, mut dump: Dump) -> Result<Plan, ExchangeEr
         c.task_id = task(&c.task_id);
         c.actor = actor(&c.actor);
     }
+    for t in &mut dump.transitions {
+        t.id = model::TransitionId::from_ulid(fresh(t.id.ulid()));
+        t.task_id = task(&t.task_id);
+        t.project_id = project(&t.project_id);
+        t.actor = actor(&t.actor);
+    }
     for d in &mut dump.dependencies {
         d.blocker = task(&d.blocker);
         d.blocked = task(&d.blocked);
@@ -568,6 +574,9 @@ pub fn apply(w: &mut dyn Writer, plan: Plan) -> Result<Vec<ActivityEntry>, Store
     }
     for c in &dump.costs {
         w.insert_cost_entry(c)?;
+    }
+    for t in &dump.transitions {
+        w.insert_transition(t)?;
     }
     for l in &dump.git_links {
         w.insert_git_link(l)?;

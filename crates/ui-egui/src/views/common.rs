@@ -270,3 +270,44 @@ pub fn title_link(ui: &mut Ui, row: &TaskRow, selected: bool, out: &mut Vec<Inte
         out.push(Intent::Select(Some(row.id())));
     }
 }
+
+/// Nombre de una columna del flujo: los estados base llegan con su código
+/// (`in_progress`) y se traducen; una etapa ya trae su nombre. Una etapa
+/// borrada llega con su clave (`cola_de_dev`) y se deja legible.
+pub fn column_name(lang: Lang, name: &str) -> String {
+    match name.parse::<model::Status>() {
+        Ok(s) if s.as_str() == name => t(lang, s.label_key()),
+        _ if !name.contains(' ') && name.contains('_') => {
+            let spaced = name.replace('_', " ");
+            let mut chars = spaced.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => spaced,
+            }
+        }
+        _ => name.to_owned(),
+    }
+}
+
+/// Tiempo trabajado: `h:mm` (las horas pueden pasar de 24).
+pub fn hours(minutes: i64) -> String {
+    let m = minutes.max(0);
+    format!("{}:{:02}", m / 60, m % 60)
+}
+
+/// Tiempo transcurrido: `h:mm` hasta un día; desde ahí, `3 d 4 h`.
+pub fn duration(minutes: i64) -> String {
+    let m = minutes.max(0);
+    if m < 24 * 60 {
+        hours(m)
+    } else {
+        format!("{} d {} h", m / (24 * 60), m % (24 * 60) / 60)
+    }
+}
+
+/// Fecha y hora locales, como el resto del detalle: `2026-10-27 14:05`.
+pub fn date_time(at: Timestamp) -> String {
+    at.to_zoned(jiff::tz::TimeZone::system())
+        .strftime("%Y-%m-%d %H:%M")
+        .to_string()
+}

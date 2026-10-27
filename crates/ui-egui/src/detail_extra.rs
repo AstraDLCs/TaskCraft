@@ -9,7 +9,7 @@ use model::{EpicKind, FieldKind};
 use crate::data::{Detail, Snapshot, TaskRef};
 use crate::state::{Intent, UiState};
 use crate::theme;
-use crate::views::common;
+use crate::views::common::{self, hours};
 use crate::widgets::icons::{self, Icon};
 
 /// Estimación, épica, hito y campos personalizados (RF-MOD-13/14/15).
@@ -481,10 +481,6 @@ fn size_text(bytes: u64) -> String {
     }
 }
 
-fn hours(minutes: i64) -> String {
-    format!("{}:{:02}", minutes.max(0) / 60, minutes.max(0) % 60)
-}
-
 /// Tiempo de la tarea (RF-HIS-03/04): por actor, anotado y el cronómetro.
 pub fn time(ui: &mut Ui, detail: &Detail, st: &mut UiState, out: &mut Vec<Intent>) {
     let lang = st.lang;
@@ -558,47 +554,96 @@ pub fn time(ui: &mut Ui, detail: &Detail, st: &mut UiState, out: &mut Vec<Intent
         });
 }
 
-/// Coste que reportaron los agentes (RF-HIS-06), con el de las subtareas.
-/// Solo aparece si hay algo reportado: lo escriben los agentes, no la app.
-pub fn cost(ui: &mut Ui, detail: &Detail, lang: Lang) {
-    let cost = &detail.cost;
-    if cost.by_actor.is_empty() {
-        return;
+/// Fin de un tramo: solo la hora si acaba el mismo día en que empezó.
+fn end_of(from: Option<model::Timestamp>, to: model::Timestamp) -> String {
+    let tz = jiff::tz::TimeZone::system();
+    let end = to.to_zoned(tz.clone());
+    match from {
+        Some(f) if f.to_zoned(tz).date() == end.date() => end.strftime("%H:%M").to_string(),
+        _ => common::date_time(to),
     }
-    let amount = cost.total.amount_text();
-    let tokens = tr(
-        lang,
-        &Msg::new("ui-cost-tokens").arg("tokens", tokens_text(cost.total.tokens)),
-    );
-    let title = if amount.is_empty() {
-        format!("{} ({tokens})", t(lang, "ui-cost"))
-    } else {
-        format!("{} ({amount} · {tokens})", t(lang, "ui-cost"))
-    };
-    egui::CollapsingHeader::new(title)
-        .id_salt(("cost", &detail.row.key))
-        .show(ui, |ui| {
-            for line in &cost.by_actor {
-                ui.horizontal(|ui| {
-                    ui.label(&line.who);
-                    ui.weak(tr(
-                        lang,
-                        &Msg::new("ui-cost-tokens").arg("tokens", tokens_text(line.tokens)),
-                    ));
-                    ui.weak(line.amount_text());
-                });
-            }
-            ui.weak(t(lang, "ui-cost-hint"));
-        });
 }
 
-/// `1234567` → `1.2 M`, `12300` → `12.3 k`.
-fn tokens_text(n: u64) -> String {
-    match n {
-        0..1_000 => n.to_string(),
-        1_000..1_000_000 => format!("{:.1} k", n as f64 / 1_000.0),
-        _ => format!("{:.1} M", n as f64 / 1_000_000.0),
+/// Recorrido por las columnas (`task.timeline`): un tramo por columna, con
+/// cuándo entró y salió, cuánto estuvo y quién la llevó; y cuándo se cerró.
+pub fn journey(ui: &mut Ui, detail: &Detail, lang: Lang) {
+    let j = &detail.journey;
+    if j.steps.is_empty() && j.error.is_none() {
+        return;
     }
+    let status = detail.row.task.status;
+    let cancelled = status == model::Status::Cancelled;
+    // Cerrada: `closed_at`; si el motor aún no lo da, la hecha o la entrada
+    // en el último tramo.
+    let closed = match status {
+        model::Status::Done | model::Status::Cancelled => j
+            .closed_at
+            .or(j.done_at)
+            .or_else(|| j.steps.last().and_then(|s| s.entered_at)),
+        _ => None,
+    };
+    let title = match j.total_minutes {
+        Some(m) => format!("{} ({})", t(lang, "ui-journey"), common::duration(m)),
+        None => t(lang, "ui-journey"),
+    };
+    egui::CollapsingHeader::new(title)
+        .id_salt(("journey", &detail.row.key))
+        .default_open(true)
+        .show(ui, |ui| {
+            if let Some(e) = &j.error {
+                ui.colored_label(theme::RED, e);
+            }
+            // Dos líneas por tramo: columna y duración; debajo, cuándo y quién.
+            let last = j.steps.len().saturating_sub(1);
+            ui.spacing_mut().item_spacing.y = 1.0;
+            for (i, s) in j.steps.iter().enumerate() {
+                let closing = i == last && closed.is_some();
+                ui.horizontal(|ui| {
+                    icons::dot(ui, s.status.map(theme::status).unwrap_or(theme::GRAY));
+                    ui.strong(common::column_name(lang, &s.column));
+                    if !closing {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            match s.minutes {
+                                Some(m) => ui.label(common::duration(m)),
+                                None => ui.weak("—"),
+                            };
+                        });
+                    }
+                });
+                let from = s
+                    .entered_at
+                    .map(common::date_time)
+                    .unwrap_or_else(|| "—".into());
+                // El cierre: solo su fecha.
+                let when = if closing {
+                    from
+                } else {
+                    let to = match s.left_at {
+                        Some(at) => end_of(s.entered_at, at),
+                        None => t(lang, "ui-journey-now"),
+                    };
+                    format!("{from} – {to}")
+                };
+                let who = match s.actor.as_str() {
+                    "" => String::new(),
+                    a => format!(" · {}", tr(lang, &Msg::new("ui-journey-by").arg("who", a))),
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(RichText::new(format!("{when}{who}")).small().weak());
+                });
+                ui.add_space(5.0);
+            }
+            if let Some(at) = closed {
+                let key = if cancelled {
+                    "ui-journey-cancelled"
+                } else {
+                    "ui-journey-done"
+                };
+                ui.add_space(4.0);
+                ui.label(tr(lang, &Msg::new(key).arg("date", common::date_time(at))));
+            }
+        });
 }
 
 /// Ramas, commits y PRs vinculados (RF-INT-04, D16): se abren en el navegador.

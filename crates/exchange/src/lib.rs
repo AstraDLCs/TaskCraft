@@ -32,7 +32,7 @@ pub const FORMAT: &str = "taskcraft";
 /// v2 (M5): épicas e hitos, plantillas, adjuntos y relaciones.
 /// v3 (M11, D15): interfaces y asignados con rol.
 /// v7 (RF-MOD-19): diagramas Mermaid.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 const MANIFEST: &str = "manifest.json";
 const DATA: &str = "workspace.json";
@@ -91,6 +91,10 @@ pub struct Dump {
     /// Diagramas Mermaid de los proyectos (RF-MOD-19), desde la v7.
     #[serde(default)]
     pub diagrams: Vec<model::Diagram>,
+    /// Recorrido de las tareas (D24), desde la v8; del paso más antiguo al
+    /// más reciente.
+    #[serde(default)]
+    pub transitions: Vec<model::Transition>,
     /// Contenido de los adjuntos por `sha256`; viaja aparte en el ZIP.
     #[serde(skip)]
     pub blobs: std::collections::BTreeMap<String, Vec<u8>>,
@@ -264,6 +268,11 @@ pub fn collect(r: &dyn Reader, only: Option<&[ProjectId]>) -> Result<Dump, Store
         .into_iter()
         .filter(|d| wanted(&d.project_id))
         .collect();
+    let transitions = r
+        .transitions(&store::TransitionFilter::default())?
+        .into_iter()
+        .filter(|t| ids.contains(&t.task_id))
+        .collect();
     let (templates, views) = match only {
         None => (r.templates()?, r.views()?),
         Some(_) => (Vec::new(), Vec::new()),
@@ -288,6 +297,7 @@ pub fn collect(r: &dyn Reader, only: Option<&[ProjectId]>) -> Result<Dump, Store
         git_links,
         cycles,
         diagrams,
+        transitions,
         blobs,
     })
 }
@@ -387,8 +397,22 @@ pub fn read(r: impl Read + Seek) -> Result<(Manifest, Dump), ExchangeError> {
 /// Cada migración lleva el JSON de la versión `n` a la `n + 1`. Nunca se
 /// edita una publicada: se añade otra.
 type FormatMigration = fn(Value) -> Result<Value, ExchangeError>;
-const MIGRATIONS: &[FormatMigration] =
-    &[v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7];
+const MIGRATIONS: &[FormatMigration] = &[
+    v1_to_v2, v2_to_v3, v3_to_v4, v4_to_v5, v5_to_v6, v6_to_v7, v7_to_v8,
+];
+
+/// v7 → v8 (D24): lista de transiciones vacía; al importar, el recorrido se
+/// reconstruye del historial.
+fn v7_to_v8(mut data: Value) -> Result<Value, ExchangeError> {
+    let Some(root) = data.as_object_mut() else {
+        return Err(ExchangeError::NotTaskcraft(
+            "workspace.json is not an object".into(),
+        ));
+    };
+    root.entry("transitions")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    Ok(data)
+}
 
 /// v6 → v7 (RF-MOD-19): lista de diagramas vacía; los proyectos empiezan
 /// a numerarlos en 1.
@@ -683,6 +707,14 @@ pub fn validate(d: &Dump) -> Vec<Problem> {
             problems.push(Problem {
                 code: "dangling-cost",
                 detail: format!("cost {} refers to a missing task or agent", c.id),
+            });
+        }
+    }
+    for t in &d.transitions {
+        if !tasks.contains(&t.task_id) || !actor_ok(&t.actor) {
+            problems.push(Problem {
+                code: "dangling-transition",
+                detail: format!("transition {} refers to a missing task or agent", t.id),
             });
         }
     }

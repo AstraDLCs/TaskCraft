@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("sql/v10.sql"),
     include_str!("sql/v11.sql"),
     include_str!("sql/v12.sql"),
+    include_str!("sql/v13.sql"),
 ];
 
 /// ¿Es una cadena de conexión de PostgreSQL?

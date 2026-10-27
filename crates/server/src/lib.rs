@@ -71,6 +71,21 @@ pub fn open_store(db: &Path) -> Result<Box<dyn store::Store>, store::StoreError>
     }
 }
 
+/// El engine del workspace, listo para trabajar: con su carpeta de copias y
+/// el recorrido de las tareas antiguas reconstruido (D24). Lo usan el daemon
+/// y los modos sin daemon de la app y de la CLI.
+pub fn open_engine(db: &Path) -> Result<Engine, store::StoreError> {
+    let mut engine = Engine::new(open_store(db)?);
+    if let Some(home) = home(db) {
+        engine.set_home(home);
+    }
+    // Si falla, se sigue sin él: lo notarán las métricas, no el trabajo.
+    if let Err(e) = engine.backfill_transitions() {
+        tracing::warn!(error = %e, "task journeys not rebuilt");
+    }
+    Ok(engine)
+}
+
 /// Carpeta del workspace (copias de seguridad): la de su archivo o, en
 /// PostgreSQL, `<datos>/taskcraft/postgres/<base>`.
 pub fn home(db: &Path) -> Option<PathBuf> {
@@ -129,11 +144,7 @@ impl Daemon {
     /// Toma el lock del workspace y abre (migrando si hace falta) la base.
     pub fn open(opts: Options) -> Result<Self, ServeError> {
         let lock = lock_workspace(&opts.db)?;
-        let store = open_store(&opts.db).map_err(ServeError::Store)?;
-        let mut engine = Engine::new(store);
-        if let Some(home) = home(&opts.db) {
-            engine.set_home(home);
-        }
+        let engine = open_engine(&opts.db).map_err(ServeError::Store)?;
         let engine = SharedEngine::new(engine);
         let (events, _) = broadcast::channel(256);
         let sender = events.clone();

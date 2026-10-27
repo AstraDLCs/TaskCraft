@@ -1262,7 +1262,9 @@ name = "diagram"
 version = "2.0.0"
 dependencies = [
  "epaint_default_fonts",
+ "harfrust",
  "i18n",
+ "log",
  "merman",
  "resvg",
 ]

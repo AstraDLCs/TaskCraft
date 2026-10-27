@@ -19,7 +19,6 @@ const PREVIEW_DELAY: Duration = Duration::from_millis(350);
 /// Con menos ancho, la lista va encima del diagrama.
 const SIDE_BY_SIDE: f32 = 760.0;
 const LIST_W: f32 = 250.0;
-const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 
 pub fn show(
     ui: &mut Ui,
@@ -179,42 +178,17 @@ fn detail(
     }
     ui.add_space(4.0);
 
-    ui.horizontal(|ui| {
-        ui.label(t(lang, "ui-zoom"));
-        let at = ZOOMS
-            .iter()
-            .position(|z| (*z - st.diagrams.zoom).abs() < 0.01)
-            .unwrap_or(2);
-        if ui
-            .add_enabled(at > 0, egui::Button::new("−").small())
-            .clicked()
-        {
-            st.diagrams.zoom = ZOOMS.get(at.saturating_sub(1)).copied().unwrap_or(1.0);
-        }
-        ui.label(format!("{:.0} %", st.diagrams.zoom * 100.0));
-        if ui
-            .add_enabled(at + 1 < ZOOMS.len(), egui::Button::new("+").small())
-            .clicked()
-        {
-            st.diagrams.zoom = ZOOMS.get(at + 1).copied().unwrap_or(1.0);
-        }
-    });
-    let height = (ui.available_height() - 90.0).max(160.0);
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        egui::ScrollArea::both()
-            .id_salt(("diagram", d.diagram.id))
-            .max_height(height)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                diagram::zoomed(
-                    ui,
-                    &mut md.diagrams,
-                    lang,
-                    &d.diagram.source,
-                    st.diagrams.zoom,
-                );
-            });
-    });
+    // Visor con zoom (TC-1): ocupa lo que queda, dejando sitio a «Citado en».
+    let height = (ui.available_height() - 110.0).max(220.0);
+    diagram::viewer(
+        ui,
+        &mut md.diagrams,
+        lang,
+        d.diagram.id,
+        &d.diagram.source,
+        height,
+        true,
+    );
 
     ui.add_space(4.0);
     ui.strong(tr(
@@ -321,8 +295,15 @@ fn editor_body(
     };
     ui.add_space(4.0);
     ui.strong(t(lang, "ui-diagram-preview"));
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        diagram::fitted(ui, &mut md.diagrams, lang, &ed.preview);
-    });
+    let key = ed.id.map(|id| id.to_string()).unwrap_or_default();
+    diagram::viewer(
+        ui,
+        &mut md.diagrams,
+        lang,
+        ("preview", key),
+        &ed.preview,
+        360.0,
+        // Dentro de la página con scroll del editor: la rueda la desplaza.
+        false,
+    );
 }

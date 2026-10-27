@@ -54,8 +54,7 @@ status_create, also owned by an agent (owner=): its queue or its workbench. Movi
 column owned by an agent assigns it to that agent, and task_next offers what is in your columns \
 first. If the task says who comes next (\"then pass it to the reviewer\"), create or use that \
 agent's column and move the task there with a note. Read the notes returned by \
-task_claim/task_next: they are what previous agents left for you. If you know your token usage or cost, report it per task with \
-cost_report (tokens_in, tokens_out, amount, model). Put the task key in your commit messages \
+task_claim/task_next: they are what previous agents left for you. Put the task key in your commit messages \
 (\"API-42: ...\") so TaskCraft links the commits to the task, and record pull requests with \
 git_link kind=pr. To explain a design or a flow, write it as a Mermaid diagram with \
 diagram_create (it gets a key like API-D3; check render_error and fix it with diagram_update) and \

@@ -4,7 +4,6 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use engine::Engine;
 use i18n::{Lang, Localize, Msg};
 use store_sqlite::SqliteStore;
 use ui_egui::{Conn, TaskCraftApp};
@@ -96,6 +95,7 @@ fn main() -> ExitCode {
             });
             let ctx = cc.egui_ctx.clone();
             app.set_waker(Box::new(move || ctx.request_repaint()));
+            app.draw_diagrams_in_background();
             if let Some(why) = warning {
                 app.set_status(Err(why));
             }
@@ -153,12 +153,8 @@ fn connect(db: &Path, lang: Lang) -> Result<Started, String> {
                 .arg("reason", why.as_str());
             i18n::tr(lang, &msg)
         })?;
-        let store = server::open_store(db).map_err(|e| e.localize(lang))?;
+        let engine = server::open_engine(db).map_err(|e| e.localize(lang))?;
         let msg = Msg::new("ui-local-mode").arg("reason", why);
-        let mut engine = Engine::new(store);
-        if let Some(home) = server::home(db) {
-            engine.set_home(home);
-        }
         Ok(Started::Local(
             Conn::local(engine),
             i18n::tr(lang, &msg),

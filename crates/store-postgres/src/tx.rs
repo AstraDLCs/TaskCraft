@@ -14,7 +14,7 @@ use crate::pg::{self, Param, Row, p};
 use crate::rows::{
     ActivityRow, AgentRow, AttachmentRow, CommentRow, CostRow, CycleRow, DiagramRow, EpicRow,
     GitRow, InboxRow, InterfaceRow, ProjectRow, SessionRow, TaskParts, TaskRow, TemplateRow,
-    TimeRow, WorkspaceRow, json, parse, text, to_json,
+    TimeRow, TransitionRow, WorkspaceRow, json, parse, text, to_json,
 };
 
 const CHECKLIST: &str = "checklist";
@@ -1286,6 +1286,79 @@ impl Reader for PgTx<'_> {
         .collect()
     }
 
+    fn transitions(&self, filter: &store::TransitionFilter) -> StoreResult<Vec<model::Transition>> {
+        let mut conditions = vec!["1 = 1".to_owned()];
+        let mut values: Vec<String> = Vec::new();
+        // Guarda el valor y devuelve su marcador.
+        let mut slot = |value: String| {
+            values.push(value);
+            format!("?{}", values.len())
+        };
+        if let Some(task) = filter.task {
+            conditions.push(format!("task_id = {}", slot(task.to_string())));
+        }
+        if let Some(project) = filter.project {
+            conditions.push(format!("project_id = {}", slot(project.to_string())));
+        }
+        if !filter.projects.is_empty() {
+            let slots: Vec<String> = filter
+                .projects
+                .iter()
+                .map(|p| slot(p.to_string()))
+                .collect();
+            conditions.push(format!("project_id IN ({})", slots.join(", ")));
+        }
+        if let Some(since) = filter.since {
+            conditions.push(format!("at >= {}", slot(since.to_string())));
+        }
+        if let Some(until) = filter.until {
+            conditions.push(format!("at < {}", slot(until.to_string())));
+        }
+        // De la tarea: papelera, épica o hito y ciclo.
+        let mut of_task = Vec::new();
+        if filter.live {
+            of_task.push("deleted_at IS NULL".to_owned());
+        }
+        if let Some(group) = filter.group {
+            let n = slot(group.to_string());
+            of_task.push(format!("(epic_id = {n} OR milestone_id = {n})"));
+        }
+        if let Some(cycle) = filter.cycle {
+            let n = slot(cycle.to_string());
+            of_task.push(format!("cycles::jsonb @> jsonb_build_array({n}::text)"));
+        }
+        if !of_task.is_empty() {
+            conditions.push(format!(
+                "task_id IN (SELECT id FROM task WHERE {})",
+                of_task.join(" AND ")
+            ));
+        }
+        let sql = format!(
+            "{} WHERE {} ORDER BY at, id",
+            TransitionRow::SELECT,
+            conditions.join(" AND ")
+        );
+        self.rows(
+            &sql,
+            values.iter().map(Param::from).collect(),
+            TransitionRow::read,
+        )?
+        .into_iter()
+        .map(TransitionRow::into_model)
+        .collect()
+    }
+
+    fn tasks_without_transitions(&self) -> StoreResult<Vec<TaskId>> {
+        self.rows(
+            "SELECT id FROM task WHERE id NOT IN (SELECT task_id FROM task_transition) ORDER BY id",
+            Vec::new(),
+            |r| r.get::<String>("id"),
+        )?
+        .iter()
+        .map(|id| crate::rows::parse("task.id", id))
+        .collect()
+    }
+
     fn git_links(&self, task: Option<TaskId>) -> StoreResult<Vec<model::GitLink>> {
         let rows = match task {
             Some(t) => self.rows(
@@ -1500,6 +1573,7 @@ impl Writer for PgTx<'_> {
             "saved_view",
             "today_mark",
             "time_entry",
+            "task_transition",
             "cost_entry",
             "git_link",
             "attachment",
@@ -2124,6 +2198,26 @@ impl Writer for PgTx<'_> {
                 e.currency,
                 e.note,
                 e.at.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn insert_transition(&mut self, t: &model::Transition) -> StoreResult<()> {
+        self.exec(
+            "INSERT INTO task_transition (id, task_id, project_id, from_status, from_stage,
+                                          to_status, to_stage, actor, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            p![
+                t.id.to_string(),
+                t.task_id.to_string(),
+                t.project_id.to_string(),
+                t.from_status.map(|s| s.as_str().to_owned()),
+                t.from_stage,
+                t.to_status.as_str(),
+                t.to_stage,
+                t.actor.to_string(),
+                t.at.to_string(),
             ],
         )?;
         Ok(())

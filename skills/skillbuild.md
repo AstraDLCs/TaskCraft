@@ -273,7 +273,6 @@ answers, trust the server and report the mismatch to the supervisor with inbox_a
 ## Etiquette
 - Comment progress with comment_add; tick checklist and criteria with task_check.
 - Put the task key in commit messages ("API-42: …"); record PRs with git_link kind=pr.
-- Report usage with cost_report (tokens_in, tokens_out, amount, model) when known.
 - Ideas or bugs outside the task → inbox_add, not new tasks (unless you are a planner).
 ````
 
@@ -315,7 +314,7 @@ answers, trust the server and report the mismatch to the supervisor with inbox_a
 
 **Reporter / supervisor assistant** (level `read`) — summarises.
 - Use the `status_report` prompt, or `task_list` with filters, `activity_summary`,
-  `taskcraft://activity`, `cycle_get current`, `metrics_*`, `cost_summary`. Cite task keys. Never
+  `taskcraft://activity`, `cycle_get current`, `metrics_*` (`metrics_flow` for lead/cycle time, handoffs and returns). Cite task keys. Never
   write.
 
 ## 7. Validation checklist
@@ -334,7 +333,7 @@ answers, trust the server and report the mismatch to the supervisor with inbox_a
 
 | Skill | Path | Archetype | Built / reviewed |
 |---|---|---|---|
-| *(none yet)* | | | |
+| `taskcraft-claude-code` | [skills/taskcraft-claude-code/SKILL.md](taskcraft-claude-code/SKILL.md) (installed as a symlink in `.claude/skills/`) | Planner (`cc-planner`, plan) + Worker (`cc-dev`, execute, any ready task) + Reviewer (`cc-revisor`, execute; columns «Cola de cc-revisor», «Revisando», «Cola de cc-dev») of the interface "Claude code"; project TC | 2026-10-27 — dry run: diagram + plan → claim → comment → check → done; reviewer added the same day |
 
 ## 9. Maintaining this document
 
@@ -378,7 +377,7 @@ MCP name = command with `_` (`task.next` → `task_next`). Plus the MCP-only `ag
 | Projects / workflow | `project_create`, `project_list`, `project_get`, `project_update`, `project_archive`, `project_unarchive`, `status_list`, `status_create`, `status_update`, `status_delete`, `field_*`, `label_create`, `label_list`, `label_update` |
 | Agents / interfaces | `agent_use`, `agent_create`, `agent_mine`, `agent_list`, `agent_get`, `agent_update`, `agent_pause`, `agent_resume`, … `interface_*` (supervisor) |
 | Communication | `comment_add`, `comment_list`, `activity_list`, `activity_summary`, `inbox_add`, `inbox_list` |
-| Time / cost / metrics | `timer_start`, `time_log`, `time_report`, `time_sheet`, `cost_report`, `cost_list`, `cost_summary`, `metrics_burndown`, `metrics_cfd`, `metrics_agents` |
+| Time / cost / metrics | `timer_start`, `time_log`, `time_report`, `time_sheet`, `cost_report`, `cost_list`, `cost_summary`, `metrics_burndown`, `metrics_cfd`, `metrics_agents`, `metrics_flow`, `task_timeline` |
 | Integrations | `git_link`, `git_unlink`, `git_links`, `attachment_add`, `attachment_list`, `attachment_get`, `attachment_remove`, `view_save`, `view_list`, `view_get` |
 | Supervisor only | `task_answer`, `task_reject`, `lock_set`, `lock_clear`, `activity_revert`, `inbox_convert`, `inbox_discard`, `agent_register` (needs `interface`), `interface_register`, `interface_token`, `interface_rotate_token`, `workspace_configure`, `workspace_web_token`, `automation_*`, `webhook_create`, `webhook_delete`, `webhook_record`, `cycle_rollover` |
 | Supervisor only (D23, delete data) | `project_delete` (confirm = key), `workspace_wipe` (confirm = name), `activity_prune` — always after a `.taskcraft` safety copy |

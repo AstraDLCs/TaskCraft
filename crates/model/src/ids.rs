@@ -21,6 +21,10 @@ foundation::ulid_id! { TemplateId }
 foundation::ulid_id! { AttachmentId }
 foundation::ulid_id! { TimeEntryId }
 foundation::ulid_id! { CostEntryId }
+foundation::ulid_id! {
+    /// Paso del recorrido de una tarea (D24); ordenable por tiempo.
+    TransitionId
+}
 foundation::ulid_id! { GitLinkId }
 foundation::ulid_id! { CycleId }
 foundation::ulid_id! { DiagramId }

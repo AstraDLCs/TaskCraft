@@ -1036,10 +1036,11 @@ pub enum MetricsTab {
 pub struct MetricsData {
     pub burndown: serde_json::Value,
     pub cfd: serde_json::Value,
-    pub agents: serde_json::Value,
+    /// Flujo (`metrics.flow`): resumen, throughput, agentes y columnas.
+    pub flow: serde_json::Value,
     pub sheet: serde_json::Value,
-    /// Coste por agente (RF-HIS-06).
-    pub cost: serde_json::Value,
+    /// Lo que el motor no pudo calcular: `comando: mensaje`.
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1050,6 +1051,9 @@ pub struct MetricsState {
     pub data: Option<MetricsData>,
     /// Alcance con el que se calcularon (al cambiarlo se recalculan).
     pub scope: Option<Scope>,
+    /// La vista se dibujó en el fotograma anterior: al volver a ella se
+    /// recalculan.
+    pub shown: bool,
 }
 
 impl Default for MetricsState {
@@ -1060,30 +1064,19 @@ impl Default for MetricsState {
             period: "week",
             data: None,
             scope: None,
+            shown: false,
         }
     }
 }
 
-/// Vista Diagramas (RF-MOD-19): el elegido, el editor abierto y el zoom.
-#[derive(Debug, Clone)]
+/// Vista Diagramas (RF-MOD-19): el elegido y el editor abierto. El zoom y el
+/// desplazamiento los guarda el visor (`widgets::diagram::viewer`).
+#[derive(Debug, Clone, Default)]
 pub struct DiagramsState {
     pub selected: Option<model::DiagramId>,
     pub editor: Option<DiagramEditor>,
-    /// 1 = tamaño natural.
-    pub zoom: f32,
     /// Borrado pendiente de confirmar.
     pub confirm_delete: Option<model::DiagramId>,
-}
-
-impl Default for DiagramsState {
-    fn default() -> Self {
-        Self {
-            selected: None,
-            editor: None,
-            zoom: 1.0,
-            confirm_delete: None,
-        }
-    }
 }
 
 /// Alta (`id = None`) o edición de un diagrama, con la vista previa de la

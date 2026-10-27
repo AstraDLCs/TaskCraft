@@ -283,6 +283,7 @@ fn seed(engine: &mut Engine) -> Result<exchange::Dump, String> {
         git_links: Vec::new(),
         cycles: Vec::new(),
         diagrams: Vec::new(),
+        transitions: Vec::new(),
         blobs: Default::default(),
     })
 }

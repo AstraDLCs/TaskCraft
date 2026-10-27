@@ -128,6 +128,23 @@ pub struct CostFilter {
     pub until: Option<model::Timestamp>,
 }
 
+/// Qué pasos del recorrido de las tareas se leen (D24).
+#[derive(Debug, Clone, Default)]
+pub struct TransitionFilter {
+    pub task: Option<TaskId>,
+    pub project: Option<ProjectId>,
+    /// Solo de estos proyectos; vacío = todos.
+    pub projects: Vec<ProjectId>,
+    pub since: Option<model::Timestamp>,
+    pub until: Option<model::Timestamp>,
+    /// Solo de tareas fuera de la papelera.
+    pub live: bool,
+    /// Solo de tareas de esta épica o este hito (RF-MOD-13).
+    pub group: Option<model::EpicId>,
+    /// Solo de tareas de este ciclo (RF-INT-05).
+    pub cycle: Option<model::CycleId>,
+}
+
 /// Qué candidatas busca `task.next`.
 #[derive(Debug, Clone)]
 pub struct NextFilter {
@@ -299,6 +316,11 @@ pub trait Reader {
     fn time_entries(&self, filter: &TimeFilter) -> StoreResult<Vec<model::TimeEntry>>;
     /// Costes reportados (RF-HIS-06), del más antiguo al más reciente.
     fn cost_entries(&self, filter: &CostFilter) -> StoreResult<Vec<model::CostEntry>>;
+    /// Recorrido de las tareas (D24), del paso más antiguo al más reciente.
+    fn transitions(&self, filter: &TransitionFilter) -> StoreResult<Vec<model::Transition>>;
+    /// Tareas (también en la papelera) sin ningún paso de recorrido: las de
+    /// antes de D24 o importadas de un archivo anterior.
+    fn tasks_without_transitions(&self) -> StoreResult<Vec<TaskId>>;
     /// Vínculos con git (RF-INT-04) de una tarea o de todas, por fecha.
     fn git_links(&self, task: Option<TaskId>) -> StoreResult<Vec<model::GitLink>>;
 
@@ -406,6 +428,7 @@ pub trait Writer: Reader {
     fn insert_time_entry(&mut self, entry: &model::TimeEntry) -> StoreResult<()>;
     fn update_time_entry(&mut self, entry: &model::TimeEntry) -> StoreResult<()>;
     fn insert_cost_entry(&mut self, entry: &model::CostEntry) -> StoreResult<()>;
+    fn insert_transition(&mut self, transition: &model::Transition) -> StoreResult<()>;
     /// `false` si ya existía un vínculo igual (tarea, tipo y referencia).
     fn insert_git_link(&mut self, link: &model::GitLink) -> StoreResult<bool>;
     fn delete_git_link(&mut self, id: model::GitLinkId) -> StoreResult<bool>;

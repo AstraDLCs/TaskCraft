@@ -91,8 +91,10 @@ impl Markdown {
                     let source = self.sources.get(&key).cloned().unwrap_or_default();
                     let shown = diagram::fitted(ui, &mut self.diagrams, self.lang, &source);
                     if let Some(r) = shown {
+                        let hint =
+                            format!("{key} · {}", i18n::t(self.lang, "ui-diagram-open-hint"));
                         let r = r
-                            .on_hover_text(&key)
+                            .on_hover_text(hint)
                             .on_hover_cursor(eframe::egui::CursorIcon::PointingHand);
                         if r.clicked() {
                             ui.ctx()

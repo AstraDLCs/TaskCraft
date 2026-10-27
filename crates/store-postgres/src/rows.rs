@@ -831,6 +831,51 @@ impl CostRow {
     }
 }
 
+pub(crate) struct TransitionRow {
+    id: String,
+    task_id: String,
+    project_id: String,
+    from_status: Option<String>,
+    from_stage: Option<String>,
+    to_status: String,
+    to_stage: Option<String>,
+    actor: String,
+    at: String,
+}
+
+impl TransitionRow {
+    pub const SELECT: &str = "SELECT id, task_id, project_id, from_status, from_stage, \
+                              to_status, to_stage, actor, at FROM task_transition";
+
+    pub fn read(r: &Row<'_>) -> crate::pg::Result<Self> {
+        Ok(Self {
+            id: r.get("id")?,
+            task_id: r.get("task_id")?,
+            project_id: r.get("project_id")?,
+            from_status: r.get("from_status")?,
+            from_stage: r.get("from_stage")?,
+            to_status: r.get("to_status")?,
+            to_stage: r.get("to_stage")?,
+            actor: r.get("actor")?,
+            at: r.get("at")?,
+        })
+    }
+
+    pub fn into_model(self) -> StoreResult<model::Transition> {
+        Ok(model::Transition {
+            id: parse("task_transition.id", &self.id)?,
+            task_id: parse("task_transition.task_id", &self.task_id)?,
+            project_id: parse("task_transition.project_id", &self.project_id)?,
+            from_status: parse_opt("task_transition.from_status", self.from_status)?,
+            from_stage: self.from_stage,
+            to_status: parse("task_transition.to_status", &self.to_status)?,
+            to_stage: self.to_stage,
+            actor: parse("task_transition.actor", &self.actor)?,
+            at: parse("task_transition.at", &self.at)?,
+        })
+    }
+}
+
 pub(crate) struct GitRow {
     id: String,
     task_id: String,

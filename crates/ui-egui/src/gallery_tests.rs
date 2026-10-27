@@ -330,10 +330,58 @@ pub(crate) fn demo_app() -> TaskCraftApp {
     app
 }
 
+/// Relevos entre agentes y una devolución en API, para el flujo (TC-6):
+/// una cola de claude-1, y API-6 va y vuelve del revisor. Sin agente, lo
+/// mueve el supervisor.
+fn handoffs(app: &mut TaskCraftApp) {
+    // Una vez por app: el test de tamaños abre todas las escenas seguidas.
+    let done = app
+        .snap
+        .projects
+        .iter()
+        .any(|p| p.workflow.iter().any(|s| s.key == "cola_de_dev"));
+    if done {
+        return;
+    }
+    run(
+        app,
+        "status.create",
+        &[
+            ("project", "API"),
+            ("name", "Cola de dev"),
+            ("base", "todo"),
+            ("owner", "claude-1"),
+        ],
+    );
+    for (task, status, agent) in [
+        ("API-6", "cola_de_dev", ""),
+        ("API-6", "in_progress", "claude-1"),
+        ("API-6", "cola_de_revisor", "claude-1"),
+        ("API-6", "mesa_de_revisor", "revisor"),
+        ("API-6", "cola_de_dev", "revisor"),
+        ("API-6", "in_progress", "claude-1"),
+        ("API-6", "cola_de_revisor", "claude-1"),
+        ("API-6", "mesa_de_revisor", "revisor"),
+        ("API-6", "done", "revisor"),
+        ("API-7", "mesa_de_revisor", "revisor"),
+        ("API-7", "done", "revisor"),
+        ("API-5", "done", "claude-2"),
+    ] {
+        let mut args = vec![("task", task), ("status", status)];
+        if !agent.is_empty() {
+            args.push(("as_agent", agent));
+        }
+        run(app, "task.move", &args);
+    }
+    if let Some(p) = app.snap.projects.iter().find(|p| p.key == "API") {
+        app.st.scope = crate::data::Scope::Project(p.id);
+    }
+}
+
 /// Diálogos y paneles abiertos encima, por nombre.
 type Scene = (&'static str, fn(&mut TaskCraftApp));
 
-const SCENES: [Scene; 16] = [
+const SCENES: [Scene; 18] = [
     ("board-project", |app| {
         if let Some(p) = app.snap.projects.iter().find(|p| p.key == "API") {
             app.st.scope = crate::data::Scope::Project(p.id);
@@ -341,6 +389,52 @@ const SCENES: [Scene; 16] = [
         app.st.view = ViewKind::Board;
         app.reload_now();
         app.open_task("API-1");
+    }),
+    ("metrics-project", |app| {
+        handoffs(app);
+        app.st.view = ViewKind::Metrics;
+        app.reload_now();
+    }),
+    ("journey", |app| {
+        // El detalle de API-6 con su Recorrido; las horas de verdad serían
+        // segundos, así que el recorrido se sustituye por uno con días.
+        handoffs(app);
+        app.st.view = ViewKind::List;
+        app.reload_now();
+        app.open_task("API-6");
+        // Lo pendiente de recargar, antes: si no, pisaría el recorrido.
+        app.poll();
+        let at = |hours: i64| {
+            model::Timestamp::now()
+                .checked_sub(jiff::SignedDuration::from_hours(hours))
+                .map(|t| t.to_string())
+                .unwrap_or_default()
+        };
+        let step = |status: &str, column: &str, from: i64, to: i64, who: &str| {
+            serde_json::json!({
+                "status": status, "column": column, "entered_at": at(from),
+                "left_at": at(to), "minutes": (from - to) * 60, "actor_name": who,
+            })
+        };
+        let timeline = serde_json::json!({
+            "done_at": at(2), "closed_at": at(2), "total_minutes": 75 * 60,
+            "steps": [
+                step("todo", "todo", 75, 70, "supervisor"),
+                step("todo", "Cola de dev", 70, 52, "supervisor"),
+                step("in_progress", "in_progress", 52, 30, "claude-1"),
+                step("todo", "Cola de revisor", 30, 27, "claude-1"),
+                step("in_progress", "Mesa de revisor", 27, 26, "revisor"),
+                step("todo", "Cola de dev", 26, 20, "revisor"),
+                step("in_progress", "in_progress", 20, 8, "claude-1"),
+                step("todo", "Cola de revisor", 8, 3, "claude-1"),
+                step("in_progress", "Mesa de revisor", 3, 2, "revisor"),
+                {"status": "done", "column": "done", "entered_at": at(2), "left_at": null,
+                 "minutes": 120, "actor_name": "revisor"},
+            ],
+        });
+        if let Some(d) = app.detail.as_mut() {
+            d.journey = crate::data::Journey::from_json(&timeline);
+        }
     }),
     ("shortcuts", |app| app.st.dialog = Some(Dialog::Shortcuts)),
     ("delete_data", |app| {
@@ -490,13 +584,35 @@ fn gallery() {
                 shoot(&mut h, &dir, &format!("{tag}-{}-detail", view.code()));
             }
         }
-        if !only.is_empty() && !only.split(',').any(|v| v == "dialogs") {
-            continue;
-        }
+        // Las escenas salen con «dialogs» o por su nombre o prefijo
+        // («metrics» incluye «metrics-project»).
+        let wanted = |name: &str| {
+            only.is_empty()
+                || only.split(',').any(|v| {
+                    v == "dialogs"
+                        || name == v
+                        || name.strip_prefix(v).is_some_and(|r| r.starts_with('-'))
+                })
+        };
         for (name, open) in SCENES {
+            if !wanted(name) {
+                continue;
+            }
             let mut app = demo_app();
             open(&mut app);
             let mut h = harness(app, size);
+            if name == "journey" {
+                // El Recorrido está al final del detalle: se baja hasta él.
+                h.run_steps(2);
+                h.hover_at(egui::pos2(size.0 * 0.75, size.1 * 0.5));
+                h.event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -3000.0),
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
             shoot(&mut h, &dir, &format!("{tag}-dialog-{name}"));
         }
     }

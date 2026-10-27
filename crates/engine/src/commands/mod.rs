@@ -13,6 +13,7 @@ mod deps;
 mod diagram;
 mod epic;
 mod exchange;
+mod flow;
 mod git;
 mod graph;
 mod inbox;
@@ -135,6 +136,8 @@ pub(crate) fn register(r: &mut Registry) {
     r.register(time::Burndown);
     r.register(time::Cfd);
     r.register(time::Agents);
+    r.register(flow::Flow);
+    r.register(flow::Timeline);
     r.register(cost::CostReport);
     r.register(cost::CostList);
     r.register(cost::CostSummary);
