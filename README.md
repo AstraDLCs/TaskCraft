@@ -6,6 +6,8 @@ cliente distinto (Claude Code, Cursor, Antigravity o cualquier cliente MCP) y re
 donde lo dejó otro, con todo el contexto: qué se pidió, qué se hizo, qué falta y por qué. Una
 persona supervisa desde la app de escritorio o el navegador.
 
+![Tablero de TaskCraft con las tareas de dos proyectos repartidas por columnas, los agentes asignados en cada tarjeta y el panel de actividad en vivo a la derecha](docs/img/tablero.png)
+
 > [!WARNING]
 > **Proyecto en desarrollo.** Está incompleto, cambia a menudo y **puede tener errores**,
 > incluidos fallos que pierdan o dañen datos. Haz copias (`.taskcraft`) y no lo uses aún para
@@ -74,6 +76,15 @@ flowchart LR
   - pausa una interfaz entera;
   - limita lo que puede hacer cada agente (nivel y proyectos);
   - revierte cambios concretos desde el historial.
+
+<p>
+  <img src="docs/img/detalle-tarea.png" alt="Detalle de una tarea: estado, prioridad, varios agentes asignados, sprints y una descripción en Markdown con un diagrama Mermaid incrustado" width="49%">
+  <img src="docs/img/recorrido.png" alt="Recorrido de una tarea: cada columna por la que pasó, cuánto estuvo y qué agente la llevó, de la cola de desarrollo a la revisión y vuelta" width="49%">
+</p>
+<p align="center"><em>Todo el contexto en la tarea (izquierda) y su recorrido entre agentes, con las idas y vueltas de la revisión (derecha).</em></p>
+
+![Vista de agentes: cada interfaz (Claude Code, Cursor) con sus agentes, sus permisos y los botones para pausar, desactivar o revocar, junto al historial de actividad](docs/img/agentes.png)
+<p align="center"><em>Interfaces y agentes: quién está conectado, qué puede hacer y qué ha cambiado cada uno.</em></p>
 
 ### Un ejemplo real
 
@@ -221,6 +232,15 @@ La guía completa (ciclo de trabajo, permisos, app web, PostgreSQL y paquetes) e
   - copias automáticas;
   - exportar e importar (`.taskcraft`, Markdown, CSV);
   - borrar con confirmación y copia previa.
+
+<p>
+  <img src="docs/img/diagramas.png" alt="Diagrama Mermaid de un flujo de cobro dibujado de forma nativa en la app, con la lista de tareas que lo citan" width="49%">
+  <img src="docs/img/gantt.png" alt="Vista Gantt de todos los proyectos con las dependencias entre tareas y la línea del día de hoy" width="49%">
+</p>
+<p align="center"><em>Diagramas Mermaid nativos que las tareas citan (izquierda) y Gantt con dependencias (derecha).</em></p>
+
+<sub>Capturas generadas con datos de demostración:
+`TASKCRAFT_GALLERY=dir cargo test -p ui-egui --lib -- --ignored app::gallery::gallery`.</sub>
 
 ## Desarrollo
 
